@@ -167,11 +167,12 @@ async def export_all(
     convert_options: Optional[Dict[str, Any]] = None,
     concurrency: int = DOWNLOAD_CONCURRENCY,
     log: Log = print,
+    progress: Optional[Callable[[int, int], None]] = None,
 ) -> ExportSummary:
     """Download every model in the account (or just ``task_ids``) into ``out_dir``.
 
     Already exported tasks (per the manifest) are skipped, so an interrupted run can simply
-    be started again.
+    be started again. ``progress(done, total)`` is called as each pending task finishes.
     """
     fmt = fmt.upper()
     if fmt not in FORMATS:
@@ -200,8 +201,16 @@ async def export_all(
     semaphore = asyncio.Semaphore(max(1, concurrency))
     done = 0
 
-    async def handle(task: Any) -> None:
+    def advance() -> None:
         nonlocal done
+        done += 1
+        if progress:
+            progress(done, len(pending))
+
+    if progress:
+        progress(0, len(pending))
+
+    async def handle(task: Any) -> None:
         async with semaphore:
             try:
                 if _status(task.status) != "success":
@@ -213,7 +222,7 @@ async def export_all(
                 log(f"  ! {task.task_id}: {summary.failed[task.task_id]}")
                 return
             finally:
-                done += 1
+                advance()
             if file_name is None:
                 summary.no_model.append(task.task_id)
                 return
@@ -227,7 +236,7 @@ async def export_all(
         result = await client.list_tasks(batch)
         for task_id in result.missed:
             summary.failed[task_id] = "not found (invalid, another API key, or expired)"
-            done += 1
+            advance()
         await asyncio.gather(*(handle(task) for task in result.tasks.values()))
 
     return summary

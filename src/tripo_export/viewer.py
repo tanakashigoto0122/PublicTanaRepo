@@ -1,8 +1,8 @@
 """Local gallery viewer for a folder of exported models.
 
 ``serve`` starts an HTTP server bound to localhost that serves the folder plus a single-page
-viewer (``viewer.html``) and a JSON index built by ``build_index``. Nothing leaves the machine
-except the model-viewer script, which the page loads from a CDN.
+viewer (``viewer.html``) and a JSON index built by ``build_index``. model-viewer is bundled in
+``vendor/``, so the viewer works offline and nothing leaves the machine.
 """
 
 import functools
@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from .exporter import MANIFEST_NAME
 
 INDEX_PATH = "/__viewer/models.json"
+MODEL_VIEWER_PATH = "/__viewer/model-viewer.min.js"
 # model-viewer renders glTF only; other formats are offered as downloads on the same card.
 VIEWABLE = (".glb", ".gltf")
 MODEL_EXTENSIONS = VIEWABLE + (".fbx", ".obj", ".stl", ".3mf", ".usdz")
@@ -97,26 +98,29 @@ def build_index(root: str) -> List[Dict[str, Any]]:
 
 
 class _Handler(SimpleHTTPRequestHandler):
-    def __init__(self, *args: Any, page: bytes, **kwargs: Any):
-        self._page = page
-        super().__init__(*args, **kwargs)
+    """Serves ``server.root`` (which the desktop app can change at runtime) plus the viewer assets."""
+
+    def __init__(self, request: Any, client_address: Any, server: "ViewerServer"):
+        super().__init__(request, client_address, server, directory=server.root)
 
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
-            self._send(self._page, "text/html; charset=utf-8")
+            self._send(_asset("viewer.html"), "text/html; charset=utf-8")
         elif path == INDEX_PATH:
             body = json.dumps({"root": os.path.abspath(self.directory), "models": build_index(self.directory)},
                               ensure_ascii=False).encode("utf-8")
             self._send(body, "application/json; charset=utf-8")
+        elif path == MODEL_VIEWER_PATH:
+            self._send(_asset("vendor/model-viewer.min.js"), "text/javascript; charset=utf-8", cache=True)
         else:
             super().do_GET()
 
-    def _send(self, body: bytes, content_type: str) -> None:
+    def _send(self, body: bytes, content_type: str, cache: bool = False) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -128,25 +132,39 @@ SimpleHTTPRequestHandler.extensions_map.update({".glb": "model/gltf-binary", ".g
                                                 ".webp": "image/webp", ".usdz": "model/vnd.usdz+zip"})
 
 
-def make_server(root: str, port: int = 8765) -> ThreadingHTTPServer:
+@functools.lru_cache(maxsize=None)
+def _asset(name: str) -> bytes:
+    with open(os.path.join(os.path.dirname(__file__), name), "rb") as handle:
+        return handle.read()
+
+
+class ViewerServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, root: str, port: int):
+        self.root = root
+        super().__init__(("127.0.0.1", port), _Handler)
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.server_address[1]}/"
+
+
+def make_server(root: str, port: int = 8765) -> ViewerServer:
     """Create (but do not start) the viewer server; port 0 picks a free port."""
-    page_path = os.path.join(os.path.dirname(__file__), "viewer.html")
-    with open(page_path, "rb") as handle:
-        page = handle.read()
-    handler = functools.partial(_Handler, directory=root, page=page)
     try:
-        return ThreadingHTTPServer(("127.0.0.1", port), handler)
+        return ViewerServer(root, port)
     except OSError:
         if port == 0:
             raise
-        return ThreadingHTTPServer(("127.0.0.1", 0), handler)  # requested port is busy
+        return ViewerServer(root, 0)  # requested port is busy
 
 
 def serve(root: str, port: int = 8765, open_browser: bool = True) -> None:
     if not os.path.isdir(root):
         raise FileNotFoundError(f"folder not found: {root}")
     server = make_server(root, port)
-    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    url = server.url
     print(f"Viewer for {os.path.abspath(root)}")
     print(f"Open {url}  (Ctrl+C to stop)")
     if open_browser:

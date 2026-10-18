@@ -1,6 +1,7 @@
 # tripo-export
 
-Tripo AI の **API** で生成した3Dモデルを一括ダウンロードし、新しいモデルの生成もできるコマンドラインツールです。
+Tripo AI の **API** で生成した3Dモデルを一括ダウンロードし、新しいモデルの生成もできるツールです。
+**Windows アプリ**（ダブルクリックで起動）と、コマンドラインツールの両方で使えます。
 公式 Python SDK [`tripo3d`](https://github.com/VAST-AI-Research/tripo-python-sdk)（Tripo API v3）を使っています。
 
 ## できること
@@ -13,6 +14,31 @@ Tripo AI の **API** で生成した3Dモデルを一括ダウンロードし、
 | `tripo-export view` | 保存したモデルをブラウザで一覧表示（3Dでぐるぐる回して見られる） |
 | `tripo-export history` | 生成履歴の一覧 |
 | `tripo-export balance` | APIクレジット残高 |
+
+## Windows アプリ（Tripo Model Manager）
+
+一覧ビューワー・一括エクスポート・モデル生成をまとめた Windows アプリです。Python のインストールは不要です。
+
+### 入手方法
+
+1. GitHub のこのリポジトリの **Actions** タブ →「Windows app」→ 一番上（最新）の成功した実行を開く
+2. 下の **Artifacts** にある `TripoModelManager-windows` をダウンロード（GitHub へのログインが必要）
+3. zip を展開して `TripoModelManager.exe` をダブルクリック
+
+電子署名のないアプリなので、初回は「Windows によって PC が保護されました」と出ます。「詳細情報」→「実行」で起動できます。
+自分のPCでビルドする場合は `packaging\windows\build.ps1` を実行してください（Python 3.9 以上が必要）。
+
+### 使い方
+
+- 初回起動時に設定画面が開くので、Tripo API キー（`tsk_...`）を入力します。キーは Windows の資格情報マネージャーに保存されます
+- **フォルダを変更…**：一覧に表示するフォルダ（既定: `ドキュメント\TripoModels`）。エクスポートと生成の保存先も同じフォルダです
+- **API から一括エクスポート**：API で作ったモデルを全部このフォルダにダウンロード。進み具合は画面下に表示されます
+- **モデルを生成**：テキストか画像から生成して、このフォルダに保存
+- **設定**：API キー、中国リージョン、クレジット残高の確認
+- モデルをクリックすると3D表示。ファイルは「エクスプローラーで表示」から開けます
+- 閲覧はネットなしでも動きます（エクスポートと生成は Tripo API を使うのでネット接続が必要）
+
+設定は `%APPDATA%\TripoModelManager` に保存されます。
 
 ## 注意（最初に読んでください）
 
@@ -87,7 +113,7 @@ tripo-export view ~/Desktop/models   # 別のフォルダを表示
 - `--preview` で保存したプレビュー画像がないモデルは、初回にブラウザがサムネイルを自動で作って記憶します
 - Studio から手作業で落とした GLB も、同じフォルダ（サブフォルダ可）に入れれば一緒に表示されます
 - 表示できるのは GLB / glTF です。FBX・OBJ などは同じカードからダウンロードだけできます
-- サーバーは自分のPC（127.0.0.1）でだけ動くので、モデルが外に送られることはありません。表示用のライブラリ（Google の model-viewer）を読み込むため、ネット接続は必要です
+- サーバーは自分のPC（127.0.0.1）でだけ動くので、モデルが外に送られることはありません。表示用のライブラリ（Google の model-viewer）も同梱しているので、ネットなしでも見られます
 - 終了は Ctrl+C
 
 主なオプション（`export` / `create`）：
@@ -108,3 +134,10 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 テストは偽のクライアントで動くので、APIキーもネットワークも不要です。
+
+Windows アプリを Python から直接起動する場合：
+
+```bash
+pip install -e ".[app]"
+tripo-model-manager
+```

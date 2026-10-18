@@ -10,11 +10,17 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["tripo3d>=1.0.0,<2.0.0"]
 
+[project.optional-dependencies]
+app = ["pywebview>=6.2,<7", "keyring>=25"]
+
 [project.scripts]
 tripo-export = "tripo_export.cli:main"
+
+[project.gui-scripts]
+tripo-model-manager = "tripo_export.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-tripo_export = ["viewer.html"]
+tripo_export = ["viewer.html", "vendor/*"]

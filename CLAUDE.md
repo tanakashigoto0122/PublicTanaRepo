@@ -14,9 +14,10 @@ Never commit secrets, API keys (Tripo keys start with `tsk_`), tokens, or person
 
 ## Project overview
 
-`tripo-export`: a Python CLI that bulk-downloads every 3D model generated through the
-**Tripo API** and can also generate new models (text/image to 3D). The user-facing
-README is in Japanese.
+`tripo-export`: a Python CLI and a Windows desktop app ("Tripo Model Manager") that
+bulk-download every 3D model generated through the **Tripo API**, generate new models
+(text/image to 3D), and browse a folder of models in a 3D gallery. The user-facing README
+and UI text are in Japanese.
 
 Key constraints of the Tripo API that shape the design:
 
@@ -41,12 +42,31 @@ Key constraints of the Tripo API that shape the design:
   `ThreadingHTTPServer` on 127.0.0.1 that serves the model folder, the single-page viewer at `/`,
   and a JSON index at `/__viewer/models.json`. `build_index` groups files by task, using
   `manifest.json` when present and otherwise the file stem, and includes stray model files
-  in subfolders (e.g. manual Studio downloads). The page loads `@google/model-viewer` (pinned
-  version) from jsDelivr. Models without a `*_preview.*` image get a thumbnail rendered
-  client-side by a hidden `<model-viewer>`, cached in localStorage. `viewer.html` ships as
-  package data (see `pyproject.toml`).
+  in subfolders (e.g. manual Studio downloads). `@google/model-viewer` 4.3.1 is vendored in
+  `src/tripo_export/vendor/` (Apache-2.0, license alongside it) and served at
+  `/__viewer/model-viewer.min.js`, so the viewer works offline. Models without a
+  `*_preview.*` image get a thumbnail rendered client-side by a hidden `<model-viewer>`,
+  cached in localStorage. `viewer.html` and `vendor/*` ship as package data (see
+  `pyproject.toml`). `ViewerServer.root` can be changed while the server runs (the app does this).
+  Assets are cached in memory (`_asset`), so restart the server after editing `viewer.html`.
+- `src/tripo_export/app.py`: the desktop app. A pywebview window (Edge WebView2 on Windows)
+  shows the same viewer page with `?app=1`. The page detects `window.pywebview` and adds
+  `body.app`, which reveals the toolbar, dialogs and job bar (`.app-only`). The page calls
+  public methods of `AppApi`. Long jobs (`start_export`, `start_generate`) run on a worker
+  thread, and the page polls `get_job`. Settings go in `%APPDATA%\TripoModelManager\settings.json`;
+  the API key goes in the OS keychain via `keyring`. `--self-test <report>` and
+  `--smoke-window <report>` are CI checks for the packaged exe.
 - `src/tripo_export/cli.py`: argparse front end (`balance`, `history`, `export`, `create text|image`, `view`).
   Commands that spend credits ask for confirmation unless `-y` is passed.
+
+## Windows app packaging
+
+- Optional deps: `pip install -e ".[app]"` (pywebview, keyring). GUI entry point: `tripo-model-manager`.
+- `packaging/windows/build.ps1` builds `dist\TripoModelManager.exe` locally with PyInstaller
+  (`--onefile --windowed --collect-data tripo_export`).
+- `.github/workflows/windows-app.yml` runs on push. It runs the unit tests on Windows,
+  builds the exe, runs `--self-test` and `--smoke-window` against it, and uploads the
+  `TripoModelManager-windows` artifact.
 
 ## Setup
 
@@ -69,10 +89,11 @@ There is no linter or formatter configured.
 
 Tests live in `tests/` and use stdlib `unittest`. `test_exporter.py` uses a `FakeClient`;
 `test_viewer.py` covers the index and starts a real server on port 0. pytest is not a
-dependency. The viewer page itself has no automated test. To check it by hand, run
-`tripo-export view <folder of .glb files>` and open it in Playwright/Chromium. In the cloud
-sandbox, jsDelivr is blocked, so route the model-viewer URL to a copy fetched from the npm
-registry. The Tripo API hosts were not reachable from the cloud environment where this
+dependency. `test_app.py` drives `AppApi` with the same fake client. The viewer page itself
+has no automated test. To check it by hand, run `tripo-export view <folder of .glb files>` and
+open it in Playwright/Chromium. For the app UI, inject a mock `window.pywebview.api` with
+`addInitScript` and load `/?app=1`. The real window can only be checked on Windows (CI smoke
+test). The Tripo API hosts were not reachable from the cloud environment where this
 was written, so the code has not been run against the live API. Verify against
 the SDK source (`VAST-AI-Research/tripo-python-sdk`) when touching API calls.
 
@@ -85,7 +106,8 @@ branch you did not create. Write commit messages in the imperative mood.
 
 - **Verify, don't assume.** Run the commands before documenting them, and report results faithfully.
 - **Match surrounding style.**
-- **Check dependencies before adding imports.** The only runtime dependency is `tripo3d`.
+- **Check dependencies before adding imports.** The CLI's only runtime dependency is `tripo3d`.
+  The app adds `pywebview` and `keyring` (optional `app` extra), imported lazily.
 - **Keep scope tight.**
 
 Update this file in the same commit as any change to commands, layout or conventions.

@@ -4,21 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tripo モデル一覧</title>
-<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@4.3.1/dist/model-viewer.min.js"></script>
+<link rel="icon" href="data:,">
+<script type="module" src="/__viewer/model-viewer.min.js"></script>
 <style>
   :root {
     --bg: #f6f6f4; --surface: #ffffff; --surface-2: #eeeeea; --text: #1d1d1b; --muted: #6b6b66;
-    --border: #e0e0da; --accent: #3a5bd9; --stage: radial-gradient(circle at 50% 40%, #ffffff, #e6e6e1);
+    --border: #e0e0da; --accent: #3a5bd9; --on-accent: #ffffff; --danger: #c0362c; --stage: radial-gradient(circle at 50% 40%, #ffffff, #e6e6e1);
     --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.05);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #141413; --surface: #1e1e1c; --surface-2: #2a2a27; --text: #ececea; --muted: #9c9c96;
-      --border: #33332f; --accent: #8aa2ff; --stage: radial-gradient(circle at 50% 40%, #34342f, #1a1a18);
+      --border: #33332f; --accent: #8aa2ff; --on-accent: #10131f; --danger: #ff8a7f; --stage: radial-gradient(circle at 50% 40%, #34342f, #1a1a18);
       --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.5 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif; }
   header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent);
@@ -69,6 +71,44 @@
   .hint { color: var(--muted); font-size: 12px; margin-top: auto; }
   .noview { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
   #thumbnailer { position: fixed; right: 0; bottom: 0; width: 256px; height: 256px; opacity: 0; pointer-events: none; z-index: -1; }
+  body:not(.app) .app-only { display: none !important; }
+  .appbar { max-width: 1400px; margin: 0 auto; padding: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .folder { color: var(--muted); font-size: 12px; flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btn { font: inherit; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+         border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  dialog.form { width: min(520px, 100vw - 32px); padding: 22px; }
+  dialog.form h3 { margin: 0 0 14px; font-size: 16px; }
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; font-size: 13px; }
+  .field > span { color: var(--muted); }
+  .field input[type=text], .field input[type=password], .field input[type=number], .field textarea, .field select {
+         font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .field textarea { min-height: 84px; resize: vertical; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 14px; font-size: 13px; }
+  .row label { display: flex; align-items: center; gap: 6px; }
+  .row.tight { margin: 0; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 100px 120px; gap: 10px; }
+  .cols .field { min-width: 0; }
+  .cols .field input, .cols .field select { width: 100%; }
+  .note { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  .path { font-size: 12px; color: var(--muted); word-break: break-all; }
+  .msg { font-size: 13px; margin: 0 0 12px; }
+  .msg.error { color: var(--danger); }
+  .jobbar { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 720px; margin: 0 auto; z-index: 6;
+            background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px; }
+  .jobbar .top { display: flex; gap: 10px; align-items: center; }
+  .jobbar .text { flex: 1; font-size: 13px; }
+  .jobbar .text.error { color: var(--danger); }
+  .jobbar progress { width: 100%; height: 6px; margin-top: 8px; accent-color: var(--accent); }
+  .jobbar pre { max-height: 180px; overflow: auto; font-size: 11px; background: var(--surface-2); border-radius: 8px; padding: 8px; margin: 8px 0 0; white-space: pre-wrap; }
+  .jobbar summary { font-size: 12px; color: var(--muted); cursor: pointer; margin-top: 6px; }
+  .files button.reveal { display: flex; width: 100%; justify-content: space-between; gap: 8px; font: inherit; font-size: 13px; color: var(--accent);
+             background: none; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; cursor: pointer; }
+  .files button.reveal span { color: var(--muted); }
   @media (max-width: 760px) {
     .detail { grid-template-columns: 1fr; }
     .stage { min-height: 55vh; }
@@ -89,6 +129,16 @@
       <option value="name">名前順</option>
       <option value="size">サイズの大きい順</option>
     </select>
+  </div>
+  <div class="appbar app-only">
+    <span class="folder" id="folder"></span>
+    <div class="tools">
+      <button class="btn" id="a-folder">フォルダを変更…</button>
+      <button class="btn" id="a-explorer">エクスプローラーで開く</button>
+      <button class="btn primary" id="a-export">API から一括エクスポート</button>
+      <button class="btn primary" id="a-generate">モデルを生成</button>
+      <button class="btn" id="a-settings">設定</button>
+    </div>
   </div>
 </header>
 <main>
@@ -117,6 +167,58 @@
   </div>
 </dialog>
 
+<dialog class="form app-only" id="dlg-export">
+  <h3>API から一括エクスポート</h3>
+  <p class="note">Tripo API で生成したモデルを全部、表示中のフォルダにダウンロードします。保存済みのものはスキップするので、途中で止まっても再実行すれば続きから始まります。Studio（Web版）で作ったモデルは対象外です。</p>
+  <label class="field"><span>形式</span><select id="e-format"></select></label>
+  <p class="note" id="e-cost">GLB はそのままダウンロードするのでクレジットを使いません。</p>
+  <div class="row"><label><input type="checkbox" id="e-preview" checked> プレビュー画像も保存</label></div>
+  <p class="msg error" id="e-msg" hidden></p>
+  <div class="actions"><button class="btn" data-close>キャンセル</button><button class="btn primary" id="e-start">開始</button></div>
+</dialog>
+
+<dialog class="form app-only" id="dlg-gen">
+  <h3>モデルを生成</h3>
+  <div class="row">
+    <label><input type="radio" name="g-source" value="text" checked> テキストから</label>
+    <label><input type="radio" name="g-source" value="image"> 画像から</label>
+  </div>
+  <label class="field" id="g-text"><span>プロンプト（英語がおすすめ）</span><textarea id="g-prompt" placeholder="a cute red panda, stylized, game asset"></textarea></label>
+  <div class="field" id="g-image" hidden><span>画像</span>
+    <div class="row tight"><button class="btn" id="g-pick">画像を選ぶ…</button><span class="path" id="g-path">未選択</span></div>
+  </div>
+  <div class="cols">
+    <label class="field"><span>モデルのバージョン</span><input type="text" id="g-version" list="g-versions"></label>
+    <label class="field"><span>形式</span><select id="g-format"></select></label>
+    <label class="field"><span>最大ポリゴン数</span><input type="number" id="g-faces" min="0" step="1000" placeholder="自動"></label>
+  </div>
+  <datalist id="g-versions"><option value="v3.1-20260211"><option value="v3.0-20250812"><option value="v2.5-20250123"><option value="P1-20260311"><option value="P2-20260801"></datalist>
+  <div class="row">
+    <label><input type="checkbox" id="g-detailed"> 高品質（detailed）</label>
+    <label><input type="checkbox" id="g-notex"> テクスチャなし</label>
+    <label><input type="checkbox" id="g-preview" checked> プレビュー画像も保存</label>
+  </div>
+  <p class="note">生成には API クレジットを使います（GLB 以外の形式は変換分も追加）。完了まで数分かかります。</p>
+  <p class="msg error" id="g-msg" hidden></p>
+  <div class="actions"><button class="btn" data-close>キャンセル</button><button class="btn primary" id="g-start">生成する</button></div>
+</dialog>
+
+<dialog class="form app-only" id="dlg-settings">
+  <h3>設定</h3>
+  <label class="field"><span>Tripo API キー（tsk_ で始まる文字列）</span><input type="password" id="s-key" autocomplete="off"></label>
+  <p class="note">API キーは <a href="https://platform.tripo3d.ai/" target="_blank" rel="noreferrer">platform.tripo3d.ai</a> で作れます。Windows の資格情報マネージャーに保存され、このPCの外には送られません（Tripo API への通信を除く）。Studio のクレジットとは別に、API 用のクレジットが必要です。</p>
+  <div class="row"><label><input type="checkbox" id="s-china"> 中国リージョン（openapi.tripo3d.com）を使う</label></div>
+  <div class="row"><button class="btn" id="s-balance">残高を確認</button><span id="s-balance-text" class="path"></span></div>
+  <p class="msg" id="s-msg" hidden></p>
+  <div class="actions"><button class="btn" data-close>閉じる</button><button class="btn primary" id="s-save">保存</button></div>
+</dialog>
+
+<div class="jobbar app-only" id="job" hidden>
+  <div class="top"><span class="text" id="job-text"></span><button class="btn" id="job-close" hidden>閉じる</button></div>
+  <progress id="job-progress"></progress>
+  <details><summary>ログ</summary><pre id="job-log"></pre></details>
+</div>
+
 <model-viewer id="thumbnailer" environment-image="neutral" shadow-intensity="0.6" interaction-prompt="none"
               camera-orbit="35deg 70deg auto" aria-hidden="true"></model-viewer>
 
@@ -141,7 +243,9 @@ async function load() {
   $('empty').innerHTML = models.length
     ? '一致するモデルがありません'
     : `このフォルダにはモデルがありません<br><br><code>${data.root.replace(/[<&]/g, '')}</code><br><br>` +
-      '<code>tripo-export export</code> でダウンロードしてから開いてください';
+      (appState ? '「API から一括エクスポート」か「モデルを生成」で追加するか、GLB ファイルをこのフォルダに入れてください'
+                : '<code>tripo-export export</code> でダウンロードしてから開いてください');
+  if (appState) $('folder').textContent = data.root;
   $('sort').value = store.get('tripo-viewer-sort') || 'new';
   render();
 }
@@ -207,18 +311,31 @@ function setThumb(card, m) {
 async function pump() {
   if (busy) return;
   busy = true;
+  // The model-viewer module loads asynchronously; before it is defined, setting src does nothing.
+  await customElements.whenDefined('model-viewer');
   const tv = $('thumbnailer');
   while (queue.length) {
     const { card, m, key } = queue.shift();
     if (!card.isConnected) continue;
     try {
-      await new Promise((resolve, reject) => {
-        const done = () => { tv.removeEventListener('load', done); tv.removeEventListener('error', fail); resolve(); };
-        const fail = () => { tv.removeEventListener('load', done); tv.removeEventListener('error', fail); reject(); };
-        tv.addEventListener('load', done);
-        tv.addEventListener('error', fail);
-        tv.src = url(m.model);
-      });
+      const src = url(m.model);
+      // Setting the same src again fires no new load event (happens when the list is reloaded).
+      if (!(tv.loaded && tv.src === src)) {
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => finish(reject), 60000);
+          const finish = (fn) => {
+            clearTimeout(timer);
+            tv.removeEventListener('load', ok);
+            tv.removeEventListener('error', bad);
+            fn();
+          };
+          const ok = () => finish(resolve);
+          const bad = () => finish(reject);
+          tv.addEventListener('load', ok);
+          tv.addEventListener('error', bad);
+          tv.src = src;
+        });
+      }
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 150))));
       const data = tv.toDataURL('image/webp', 0.8);
       store.set(key, data);
@@ -228,7 +345,7 @@ async function pump() {
       if (ph) ph.textContent = '表示できません';
     }
   }
-  tv.removeAttribute('src');
+  tv.src = null;
   busy = false;
 }
 
@@ -266,6 +383,14 @@ function open(i) {
     return [dt, dd];
   }));
   $('d-files').replaceChildren(...m.files.map((f) => {
+    if (appState) {
+      const b = document.createElement('button');
+      b.className = 'reveal';
+      b.innerHTML = `<b></b><span>${fmtSize(f.size)}</span>`;
+      b.querySelector('b').textContent = `${f.format} をエクスプローラーで表示`;
+      b.onclick = () => api().reveal(f.path);
+      return b;
+    }
     const a = document.createElement('a');
     a.href = url(f.path);
     a.download = f.path.split('/').pop();
@@ -291,6 +416,136 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') open(current - 1);
   if (e.key === 'ArrowRight') open(current + 1);
 });
+// ---- Desktop app (pywebview): toolbar, dialogs and background jobs -------------------------
+let appState = null, polling = false;
+const api = () => window.pywebview.api;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const showMsg = (id, text, error = true) => { const el = $(id); el.hidden = !text; el.textContent = text || ''; el.classList.toggle('error', error); };
+
+async function initApp() {
+  if (appState || !window.pywebview?.api) return;
+  document.body.classList.add('app');
+  appState = await api().get_state();
+  for (const id of ['e-format', 'g-format']) {
+    $(id).replaceChildren(...appState.formats.map((f) => new Option(f, f)));
+  }
+  await load();
+  const job = await api().get_job();
+  if (job && job.running) pollJob();
+  if (!appState.has_key) openSettings();
+}
+window.addEventListener('pywebviewready', initApp);
+
+function openSettings() {
+  $('s-key').value = '';
+  $('s-key').placeholder = appState.has_key ? '設定済み（変更する場合だけ入力）' : 'tsk_...';
+  $('s-china').checked = appState.china;
+  $('s-balance-text').textContent = '';
+  showMsg('s-msg', appState.has_key ? '' : 'まず API キーを入力してください', false);
+  $('dlg-settings').showModal();
+}
+
+$('a-folder').onclick = async () => { if (await api().choose_folder()) await load(); };
+$('a-explorer').onclick = () => api().open_folder();
+$('a-settings').onclick = openSettings;
+$('a-export').onclick = () => { showMsg('e-msg', ''); $('dlg-export').showModal(); };
+$('a-generate').onclick = () => {
+  showMsg('g-msg', '');
+  if (!$('g-version').value) $('g-version').value = appState.model_version;
+  $('dlg-gen').showModal();
+};
+document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => b.closest('dialog').close(); });
+
+$('e-format').onchange = () => {
+  $('e-cost').textContent = $('e-format').value === 'GLB'
+    ? 'GLB はそのままダウンロードするのでクレジットを使いません。'
+    : `${$('e-format').value} への変換はモデル 1 つごとに API クレジットを使います。`;
+};
+$('e-start').onclick = async () => {
+  const format = $('e-format').value;
+  if (format !== 'GLB' && !confirm(`${format} への変換で、モデルの数だけ API クレジットを使います。続けますか？`)) return;
+  const res = await api().start_export({ format, preview: $('e-preview').checked });
+  if (res.error) return showMsg('e-msg', res.error);
+  $('dlg-export').close();
+  pollJob();
+};
+
+document.querySelectorAll('input[name=g-source]').forEach((r) => {
+  r.onchange = () => { const image = r.value === 'image' && r.checked; $('g-text').hidden = image; $('g-image').hidden = !image; };
+});
+let pickedImage = null;
+$('g-pick').onclick = async () => {
+  const path = await api().pick_image();
+  if (path) { pickedImage = path; $('g-path').textContent = path; }
+};
+$('g-start').onclick = async () => {
+  if (!confirm('API クレジットを使ってモデルを生成します。続けますか？')) return;
+  const res = await api().start_generate({
+    source: document.querySelector('input[name=g-source]:checked').value,
+    prompt: $('g-prompt').value, image: pickedImage, model_version: $('g-version').value.trim(),
+    format: $('g-format').value, face_limit: Number($('g-faces').value) || null,
+    detailed: $('g-detailed').checked, no_texture: $('g-notex').checked, preview: $('g-preview').checked,
+  });
+  if (res.error) return showMsg('g-msg', res.error);
+  $('dlg-gen').close();
+  pollJob();
+};
+
+$('s-save').onclick = async () => {
+  const values = { china: $('s-china').checked };
+  if ($('s-key').value.trim()) values.api_key = $('s-key').value.trim();
+  const res = await api().save_settings(values);
+  if (res.error) return showMsg('s-msg', res.error);
+  appState = res;
+  if (res.warning) return showMsg('s-msg', res.warning);
+  $('dlg-settings').close();
+};
+$('s-balance').onclick = async () => {
+  $('s-balance-text').textContent = '確認中…';
+  const res = await api().get_balance();
+  $('s-balance-text').textContent = res.error ? `エラー: ${res.error}` : `残り ${res.balance} クレジット（保留中 ${res.frozen}）`;
+};
+
+function renderJob(job) {
+  const bar = $('job');
+  bar.hidden = !job;
+  if (!job) return;
+  const label = job.kind === 'export' ? '一括エクスポート' : 'モデル生成';
+  const text = $('job-text');
+  text.classList.toggle('error', !!job.error);
+  if (job.running) {
+    text.textContent = job.kind === 'export'
+      ? (job.total ? `${label}中… ${job.done} / ${job.total}` : `${label}: 履歴を確認中…`)
+      : `${label}中…（数分かかります）`;
+  } else {
+    text.textContent = job.error ? `${label}に失敗しました: ${job.error}` : `${label}が完了しました。${job.result || ''}`;
+  }
+  const progress = $('job-progress');
+  progress.hidden = !job.running;
+  if (job.kind === 'export' && job.total) { progress.max = job.total; progress.value = job.done; }
+  else progress.removeAttribute('value');
+  $('job-log').textContent = job.log.join('\n');
+  $('job-close').hidden = job.running;
+  for (const id of ['a-export', 'a-generate', 'a-folder']) $(id).disabled = job.running;
+}
+async function pollJob() {
+  if (polling) return;
+  polling = true;
+  let job;
+  try {
+    do {
+      job = await api().get_job();
+      renderJob(job);
+      if (job && job.running) await sleep(700);
+    } while (job && job.running);
+  } finally {
+    polling = false;
+  }
+  await load();
+}
+$('job-close').onclick = () => { $('job').hidden = true; };
+
+if (window.pywebview?.api) initApp();
 load().catch((err) => { $('empty').hidden = false; $('empty').textContent = `読み込みに失敗しました: ${err}`; });
 </script>
 </body>
