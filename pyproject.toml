@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tripo-export"
+version = "0.1.0"
+description = "Bulk export and generation of Tripo AI 3D models via the Tripo API"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["tripo3d>=1.0.0,<2.0.0"]
+
+[project.scripts]
+tripo-export = "tripo_export.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
