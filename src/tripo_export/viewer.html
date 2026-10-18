@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tripo モデル一覧</title>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@4.3.1/dist/model-viewer.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f6f4; --surface: #ffffff; --surface-2: #eeeeea; --text: #1d1d1b; --muted: #6b6b66;
+    --border: #e0e0da; --accent: #3a5bd9; --stage: radial-gradient(circle at 50% 40%, #ffffff, #e6e6e1);
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --surface: #1e1e1c; --surface-2: #2a2a27; --text: #ececea; --muted: #9c9c96;
+      --border: #33332f; --accent: #8aa2ff; --stage: radial-gradient(circle at 50% 40%, #34342f, #1a1a18);
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent);
+           backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+  .bar { max-width: 1400px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 650; }
+  .count { color: var(--muted); margin-right: auto; }
+  input[type=search], select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+           border-radius: 8px; padding: 7px 10px; }
+  input[type=search] { flex: 1 1 200px; max-width: 320px; }
+  main { max-width: 1400px; margin: 0 auto; padding: 16px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; cursor: pointer;
+          box-shadow: var(--shadow); transition: transform .12s ease, border-color .12s ease; text-align: left; padding: 0;
+          font: inherit; color: inherit; display: flex; flex-direction: column; }
+  .card:hover, .card:focus-visible { transform: translateY(-2px); border-color: var(--accent); outline: none; }
+  .thumb { aspect-ratio: 1; background: var(--stage); display: grid; place-items: center; position: relative; }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; }
+  .thumb .ph { color: var(--muted); font-size: 12px; }
+  .badge { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 650; letter-spacing: .04em;
+           background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; }
+  .meta { padding: 9px 11px 11px; min-width: 0; }
+  .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .empty { text-align: center; color: var(--muted); padding: 80px 16px; }
+  .empty code { background: var(--surface-2); padding: 2px 6px; border-radius: 6px; }
+
+  dialog { border: none; padding: 0; width: min(1100px, 100vw - 32px); max-height: calc(100vh - 32px);
+           background: var(--surface); color: var(--text); border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
+  .detail { display: grid; grid-template-columns: 1fr 300px; min-height: min(640px, calc(100vh - 32px)); }
+  .stage { background: var(--stage); position: relative; min-height: 360px; }
+  .stage model-viewer { width: 100%; height: 100%; position: absolute; inset: 0; --poster-color: transparent; outline: none; }
+  .nav { position: absolute; top: 50%; transform: translateY(-50%); border: 1px solid var(--border); background: var(--surface);
+         color: var(--text); width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 18px; z-index: 2; }
+  .nav.prev { left: 12px; } .nav.next { right: 12px; }
+  .side { padding: 18px; overflow: auto; display: flex; flex-direction: column; gap: 14px; border-left: 1px solid var(--border); }
+  .side h2 { font-size: 15px; margin: 0; word-break: break-all; padding-right: 28px; }
+  .close { position: absolute; top: 12px; right: 12px; border: none; background: none; color: var(--muted); font-size: 22px; cursor: pointer; z-index: 3; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+  dt { color: var(--muted); } dd { margin: 0; word-break: break-all; }
+  .prompt { background: var(--surface-2); border-radius: 8px; padding: 10px; font-size: 13px; white-space: pre-wrap; }
+  .files a { display: flex; justify-content: space-between; gap: 8px; text-decoration: none; color: var(--accent);
+             padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
+  .files a span { color: var(--muted); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  .controls label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: auto; }
+  .noview { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
+  #thumbnailer { position: fixed; right: 0; bottom: 0; width: 256px; height: 256px; opacity: 0; pointer-events: none; z-index: -1; }
+  @media (max-width: 760px) {
+    .detail { grid-template-columns: 1fr; }
+    .stage { min-height: 55vh; }
+    .side { border-left: none; border-top: 1px solid var(--border); }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Tripo モデル一覧</h1>
+    <span class="count" id="count"></span>
+    <input type="search" id="q" placeholder="プロンプト・ファイル名・タスクIDで検索">
+    <select id="sort" aria-label="並び順">
+      <option value="new">新しい順</option>
+      <option value="old">古い順</option>
+      <option value="name">名前順</option>
+      <option value="size">サイズの大きい順</option>
+    </select>
+  </div>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden></div>
+</main>
+
+<dialog id="dlg">
+  <div class="detail">
+    <div class="stage" id="stage">
+      <button class="nav prev" id="prev" aria-label="前へ">‹</button>
+      <button class="nav next" id="next" aria-label="次へ">›</button>
+    </div>
+    <div class="side">
+      <button class="close" id="close" aria-label="閉じる">×</button>
+      <h2 id="d-title"></h2>
+      <div class="prompt" id="d-prompt" hidden></div>
+      <dl id="d-info"></dl>
+      <div class="controls">
+        <label><input type="checkbox" id="c-rotate" checked> 自動回転</label>
+        <label><input type="checkbox" id="c-dark"> 背景を暗く</label>
+      </div>
+      <div class="files" id="d-files"></div>
+      <div class="hint">ドラッグで回転・ホイールで拡大・右ドラッグで移動・← → で前後のモデル・Esc で閉じる</div>
+    </div>
+  </div>
+</dialog>
+
+<model-viewer id="thumbnailer" environment-image="neutral" shadow-intensity="0.6" interaction-prompt="none"
+              camera-orbit="35deg 70deg auto" aria-hidden="true"></model-viewer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const url = (path) => path.split('/').map(encodeURIComponent).join('/');
+const fmtSize = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+const fmtDate = (s) => s ? new Date(s).toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const totalSize = (m) => m.files.reduce((a, f) => a + f.size, 0);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* full or blocked: thumbnails are just regenerated */ } },
+};
+
+let models = [], shown = [], current = -1;
+
+async function load() {
+  const res = await fetch('/__viewer/models.json', { cache: 'no-store' });
+  const data = await res.json();
+  models = data.models;
+  document.title = `Tripo モデル一覧 (${models.length})`;
+  $('empty').innerHTML = models.length
+    ? '一致するモデルがありません'
+    : `このフォルダにはモデルがありません<br><br><code>${data.root.replace(/[<&]/g, '')}</code><br><br>` +
+      '<code>tripo-export export</code> でダウンロードしてから開いてください';
+  $('sort').value = store.get('tripo-viewer-sort') || 'new';
+  render();
+}
+
+function render() {
+  const q = $('q').value.trim().toLowerCase();
+  const sort = $('sort').value;
+  shown = models.filter((m) => !q || [m.title, m.prompt, m.task_id].some((v) => v && v.toLowerCase().includes(q)));
+  const date = (m) => m.created || m.modified;
+  shown.sort({
+    new: (a, b) => date(b).localeCompare(date(a)),
+    old: (a, b) => date(a).localeCompare(date(b)),
+    name: (a, b) => (a.prompt || a.title).localeCompare(b.prompt || b.title, 'ja'),
+    size: (a, b) => totalSize(b) - totalSize(a),
+  }[sort]);
+
+  $('count').textContent = q ? `${shown.length} / ${models.length} 件` : `${models.length} 件`;
+  $('empty').hidden = shown.length > 0;
+  const grid = $('grid');
+  grid.replaceChildren();
+  shown.forEach((m, i) => {
+    const card = document.createElement('button');
+    card.className = 'card';
+    card.innerHTML = `<div class="thumb"><span class="ph">${m.model ? '読み込み中…' : 'プレビューなし'}</span></div>
+      <div class="meta"><div class="title"></div><div class="sub"></div></div>`;
+    card.querySelector('.title').textContent = m.prompt || m.title;
+    card.querySelector('.sub').textContent = `${fmtDate(date(m))} · ${fmtSize(totalSize(m))}`;
+    card.title = m.prompt || m.title;
+    const formats = [...new Set(m.files.map((f) => f.format))];
+    if (formats.length > 1 || formats[0] !== 'GLB') {
+      const b = document.createElement('span');
+      b.className = 'badge';
+      b.textContent = formats.join(' · ');
+      card.querySelector('.thumb').append(b);
+    }
+    card.onclick = () => open(i);
+    grid.append(card);
+    setThumb(card, m);
+  });
+}
+
+function showImg(card, src) {
+  const img = new Image();
+  img.alt = '';
+  img.loading = 'lazy';
+  img.src = src;
+  card.querySelector('.ph')?.replaceWith(img);
+}
+
+// Models without a preview image get a thumbnail rendered once by a hidden model-viewer,
+// one at a time, and cached in localStorage.
+const queue = [];
+let busy = false;
+function setThumb(card, m) {
+  if (m.preview) return showImg(card, url(m.preview));
+  if (!m.model) return;
+  const key = `tripo-thumb:${m.model}:${totalSize(m)}:${m.modified}`;
+  const cached = store.get(key);
+  if (cached) return showImg(card, cached);
+  queue.push({ card, m, key });
+  pump();
+}
+async function pump() {
+  if (busy) return;
+  busy = true;
+  const tv = $('thumbnailer');
+  while (queue.length) {
+    const { card, m, key } = queue.shift();
+    if (!card.isConnected) continue;
+    try {
+      await new Promise((resolve, reject) => {
+        const done = () => { tv.removeEventListener('load', done); tv.removeEventListener('error', fail); resolve(); };
+        const fail = () => { tv.removeEventListener('load', done); tv.removeEventListener('error', fail); reject(); };
+        tv.addEventListener('load', done);
+        tv.addEventListener('error', fail);
+        tv.src = url(m.model);
+      });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 150))));
+      const data = tv.toDataURL('image/webp', 0.8);
+      store.set(key, data);
+      showImg(card, data);
+    } catch {
+      const ph = card.querySelector('.ph');
+      if (ph) ph.textContent = '表示できません';
+    }
+  }
+  tv.removeAttribute('src');
+  busy = false;
+}
+
+function open(i) {
+  current = (i + shown.length) % shown.length;
+  const m = shown[current];
+  const stage = $('stage');
+  stage.querySelector('model-viewer, .noview')?.remove();
+  if (m.model) {
+    const mv = document.createElement('model-viewer');
+    mv.setAttribute('camera-controls', '');
+    mv.setAttribute('environment-image', 'neutral');
+    mv.setAttribute('shadow-intensity', '0.8');
+    mv.setAttribute('touch-action', 'pan-y');
+    mv.setAttribute('interaction-prompt', 'none');
+    if ($('c-rotate').checked) mv.setAttribute('auto-rotate', '');
+    mv.src = url(m.model);
+    stage.prepend(mv);
+  } else {
+    const nv = document.createElement('div');
+    nv.className = 'noview';
+    nv.textContent = `${m.files.map((f) => f.format).join(' / ')} はブラウザでは表示できません。GLB でエクスポートすると表示できます。`;
+    stage.prepend(nv);
+  }
+  stage.style.background = $('c-dark').checked ? '#111' : '';
+
+  $('d-title').textContent = m.title;
+  $('d-prompt').hidden = !m.prompt;
+  $('d-prompt').textContent = m.prompt || '';
+  const info = [['作成日', fmtDate(m.created)], ['更新日', fmtDate(m.modified)], ['タスクID', m.task_id || '—'],
+                ['サイズ', fmtSize(totalSize(m))], ['位置', `${current + 1} / ${shown.length}`]];
+  $('d-info').replaceChildren(...info.flatMap(([k, v]) => {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    return [dt, dd];
+  }));
+  $('d-files').replaceChildren(...m.files.map((f) => {
+    const a = document.createElement('a');
+    a.href = url(f.path);
+    a.download = f.path.split('/').pop();
+    a.innerHTML = `<b></b><span>${fmtSize(f.size)}</span>`;
+    a.querySelector('b').textContent = `${f.format} をダウンロード`;
+    return a;
+  }));
+  $('prev').hidden = $('next').hidden = shown.length < 2;
+  if (!$('dlg').open) $('dlg').showModal();
+}
+
+$('q').oninput = render;
+$('sort').onchange = () => { store.set('tripo-viewer-sort', $('sort').value); render(); };
+$('prev').onclick = () => open(current - 1);
+$('next').onclick = () => open(current + 1);
+$('close').onclick = () => $('dlg').close();
+$('dlg').addEventListener('close', () => $('stage').querySelector('model-viewer')?.remove());
+$('dlg').addEventListener('click', (e) => { if (e.target === $('dlg')) $('dlg').close(); });
+$('c-rotate').onchange = (e) => $('stage').querySelector('model-viewer')?.toggleAttribute('auto-rotate', e.target.checked);
+$('c-dark').onchange = (e) => { $('stage').style.background = e.target.checked ? '#111' : ''; };
+document.addEventListener('keydown', (e) => {
+  if (!$('dlg').open) return;
+  if (e.key === 'ArrowLeft') open(current - 1);
+  if (e.key === 'ArrowRight') open(current + 1);
+});
+load().catch((err) => { $('empty').hidden = false; $('empty').textContent = `読み込みに失敗しました: ${err}`; });
+</script>
+</body>
+</html>

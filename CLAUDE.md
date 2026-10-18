@@ -37,7 +37,15 @@ Key constraints of the Tripo API that shape the design:
   - Formats other than GLB go through `convert_model`, which costs credits.
   - `Manifest` (`manifest.json` in the output directory, keyed `<task_id>:<FORMAT>`)
     makes re-runs resumable. Downloads go to `*.part` first and are renamed when complete.
-- `src/tripo_export/cli.py`: argparse front end (`balance`, `history`, `export`, `create text|image`).
+- `src/tripo_export/viewer.py` + `viewer.html`: `tripo-export view`. It runs a stdlib
+  `ThreadingHTTPServer` on 127.0.0.1 that serves the model folder, the single-page viewer at `/`,
+  and a JSON index at `/__viewer/models.json`. `build_index` groups files by task, using
+  `manifest.json` when present and otherwise the file stem, and includes stray model files
+  in subfolders (e.g. manual Studio downloads). The page loads `@google/model-viewer` (pinned
+  version) from jsDelivr. Models without a `*_preview.*` image get a thumbnail rendered
+  client-side by a hidden `<model-viewer>`, cached in localStorage. `viewer.html` ships as
+  package data (see `pyproject.toml`).
+- `src/tripo_export/cli.py`: argparse front end (`balance`, `history`, `export`, `create text|image`, `view`).
   Commands that spend credits ask for confirmation unless `-y` is passed.
 
 ## Setup
@@ -59,8 +67,12 @@ There is no linter or formatter configured.
 
 ## Testing
 
-Tests live in `tests/` and use stdlib `unittest` with a `FakeClient`. pytest is not a
-dependency. The Tripo API hosts were not reachable from the cloud environment where this
+Tests live in `tests/` and use stdlib `unittest`. `test_exporter.py` uses a `FakeClient`;
+`test_viewer.py` covers the index and starts a real server on port 0. pytest is not a
+dependency. The viewer page itself has no automated test. To check it by hand, run
+`tripo-export view <folder of .glb files>` and open it in Playwright/Chromium. In the cloud
+sandbox, jsDelivr is blocked, so route the model-viewer URL to a copy fetched from the npm
+registry. The Tripo API hosts were not reachable from the cloud environment where this
 was written, so the code has not been run against the live API. Verify against
 the SDK source (`VAST-AI-Research/tripo-python-sdk`) when touching API calls.
 

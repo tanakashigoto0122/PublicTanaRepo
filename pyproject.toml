@@ -15,3 +15,6 @@ tripo-export = "tripo_export.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+tripo_export = ["viewer.html"]

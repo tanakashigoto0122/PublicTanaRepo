@@ -10,6 +10,7 @@ Tripo AI の **API** で生成した3Dモデルを一括ダウンロードし、
 | `tripo-export export` | アカウントの生成履歴にあるモデルを**全部**ダウンロード |
 | `tripo-export create text "..."` | テキストからモデルを生成してダウンロード |
 | `tripo-export create image cat.png` | 画像からモデルを生成してダウンロード |
+| `tripo-export view` | 保存したモデルをブラウザで一覧表示（3Dでぐるぐる回して見られる） |
 | `tripo-export history` | 生成履歴の一覧 |
 | `tripo-export balance` | APIクレジット残高 |
 
@@ -74,7 +75,22 @@ tripo-export create text "wooden chair" --detailed --face-limit 20000
 
 生成したモデルは `manifest.json` に記録されるので、あとで `export` を実行しても二重にダウンロードされません。
 
-主なオプション：
+### 一覧ビューワーで見る
+
+```bash
+tripo-export view                    # ./tripo_models を一覧表示（ブラウザが自動で開く）
+tripo-export view ~/Desktop/models   # 別のフォルダを表示
+```
+
+- サムネイル一覧から、クリックで3D表示（ドラッグで回転、ホイールで拡大、← → で前後のモデル）
+- プロンプト・ファイル名・タスクIDで検索、日付・名前・サイズで並べ替え
+- `--preview` で保存したプレビュー画像がないモデルは、初回にブラウザがサムネイルを自動で作って記憶します
+- Studio から手作業で落とした GLB も、同じフォルダ（サブフォルダ可）に入れれば一緒に表示されます
+- 表示できるのは GLB / glTF です。FBX・OBJ などは同じカードからダウンロードだけできます
+- サーバーは自分のPC（127.0.0.1）でだけ動くので、モデルが外に送られることはありません。表示用のライブラリ（Google の model-viewer）を読み込むため、ネット接続は必要です
+- 終了は Ctrl+C
+
+主なオプション（`export` / `create`）：
 
 | オプション | 内容 |
 |---|---|

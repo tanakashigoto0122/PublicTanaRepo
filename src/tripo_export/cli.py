@@ -71,6 +71,7 @@ async def cmd_export(args: argparse.Namespace) -> None:
     for task_id, reason in summary.failed.items():
         print(f"  failed {task_id}: {reason}")
     print(f"Files are in {os.path.abspath(args.out)}")
+    print(f"Browse them with: tripo-export view {args.out}")
     if summary.failed:
         sys.exit(1)
 
@@ -95,6 +96,15 @@ async def cmd_create(args: argparse.Namespace) -> None:
             with_preview=args.preview, options=options,
         )
     print(f"Saved {os.path.join(os.path.abspath(args.out), file_name)}")
+
+
+async def cmd_view(args: argparse.Namespace) -> None:
+    from .viewer import serve
+
+    try:
+        serve(args.directory, port=args.port, open_browser=not args.no_browser)
+    except KeyboardInterrupt:
+        print("\nViewer stopped.")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -139,6 +149,13 @@ def build_parser() -> argparse.ArgumentParser:
     i = src.add_parser("image", parents=[common, output, gen], help="from an image file or URL")
     i.add_argument("image")
     p.set_defaults(func=cmd_create)
+
+    p = sub.add_parser("view", help="browse downloaded models in the web browser")
+    p.add_argument("directory", nargs="?", default=DEFAULT_OUT_DIR,
+                   help=f"folder with models (default: {DEFAULT_OUT_DIR})")
+    p.add_argument("--port", type=int, default=8765, help="port on 127.0.0.1 (default: 8765, another if busy)")
+    p.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
+    p.set_defaults(func=cmd_view)
     return parser
 
 
