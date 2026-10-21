@@ -57,7 +57,12 @@ Key constraints of the Tripo API that shape the design:
   These need the per-server token (`ViewerServer.token`, written into the page in place of
   `__VIEWER_TOKEN__`) in `X-Viewer-Token` and a `127.0.0.1`/`localhost` Host header, so other web
   pages cannot change the folder. `PUT /__viewer/thumbnail?model=` saves the current view (WebP from
-  `toBlob`) as `<stem>_preview.webp`. Background, lighting and exposure of the 3D view are kept in
+  `toBlob`) as `<stem>_preview.webp`, and `PUT /__viewer/screenshot?name=` saves a PNG to
+  `screenshots/`. `POST /__viewer/meta` sets a model's favorite flag and memo, stored in
+  `.tripo-viewer.json` in the folder and keyed by the model's main file (`key` in the index;
+  `library` moves the keys on rename and drops them on delete). `GET /__viewer/stats?model=` reads
+  triangle/vertex/material/texture counts from the glTF JSON (`library.glb_stats`; for a .glb only
+  the header and JSON chunk are read). Each index entry also has `folder` for the folder filter. Background, lighting and exposure of the 3D view are kept in
   localStorage. The page re-reads the index every 3 s and re-renders when it changed, unless a
   dialog is open, so files added in Explorer show up on their own.
 - `src/tripo_export/library.py`: the file operations behind those endpoints and the app's

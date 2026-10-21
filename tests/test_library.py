@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import struct
 import tempfile
 import threading
 import unittest
@@ -17,6 +18,25 @@ def touch(root, rel, data=b"x"):
     with open(path, "wb") as handle:
         handle.write(data)
     return path
+
+
+def make_glb(gltf, binary=b""):
+    """A minimal .glb: header, JSON chunk and an optional BIN chunk (only the JSON is ever read)."""
+    data = json.dumps(gltf).encode()
+    data += b" " * (-len(data) % 4)
+    body = struct.pack("<II", len(data), 0x4E4F534A) + data
+    if binary:
+        body += struct.pack("<II", len(binary), 0x004E4942) + binary
+    return struct.pack("<III", 0x46546C67, 2, 12 + len(body)) + body
+
+
+CUBE = {
+    "asset": {"version": "2.0"},
+    "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]},
+               {"primitives": [{"attributes": {"POSITION": 2}}, {"attributes": {"POSITION": 2}, "mode": 1}]}],
+    "accessors": [{"count": 8}, {"count": 36}, {"count": 6}],
+    "materials": [{}, {}], "images": [{}], "animations": [{}], "skins": [{}],
+}
 
 
 class LibraryTests(unittest.TestCase):
@@ -110,6 +130,54 @@ class LibraryTests(unittest.TestCase):
             library.save_preview(self.root, "cat.glb", io.BytesIO(b"<svg>not webp</svg>"), 19)
         self.assertEqual(os.listdir(self.root), ["cat.glb"])
 
+    def test_favorite_and_memo_follow_rename_and_delete(self):
+        touch(self.root, "studio/cat.glb")
+        touch(self.root, "dog.glb")
+        library.set_meta(self.root, "studio/cat.glb", favorite=True)
+        library.set_meta(self.root, "studio/cat.glb", memo="  ゲーム用  ")
+        library.set_meta(self.root, "dog.glb", favorite=True)
+        items = {i["key"]: i for i in viewer.build_index(self.root)}
+        self.assertEqual((items["studio/cat.glb"]["favorite"], items["studio/cat.glb"]["memo"]), (True, "ゲーム用"))
+        self.assertEqual(items["studio/cat.glb"]["folder"], "studio")
+        self.assertEqual(items["dog.glb"]["folder"], "")
+
+        library.rename_model(self.root, ["studio/cat.glb"], "neko")
+        self.assertEqual(library.read_meta(self.root)["studio/neko.glb"], {"favorite": True, "memo": "ゲーム用"})
+        with mock.patch.object(library.sys, "platform", "linux"):
+            library.delete_model(self.root, ["dog.glb"])
+        self.assertEqual(set(library.read_meta(self.root)), {"studio/neko.glb"})
+        library.set_meta(self.root, "studio/neko.glb", favorite=False, memo="")
+        self.assertEqual(library.read_meta(self.root), {})
+        with self.assertRaises(ValueError):
+            library.set_meta(self.root, "missing.glb", favorite=True)
+
+    def test_broken_meta_file_is_ignored(self):
+        touch(self.root, "cat.glb")
+        touch(self.root, library.META_NAME, b"{not json")
+        [item] = viewer.build_index(self.root)
+        self.assertFalse(item["favorite"])
+
+    def test_glb_stats(self):
+        touch(self.root, "cube.glb", make_glb(CUBE, b"\0" * 16))
+        self.assertEqual(library.glb_stats(self.root, "cube.glb"), {
+            "triangles": 12 + 2, "vertices": 8 + 6 + 6, "meshes": 2, "materials": 2, "textures": 1,
+            "animations": 1, "skins": 1})
+        touch(self.root, "cube.gltf", json.dumps(CUBE).encode())
+        self.assertEqual(library.glb_stats(self.root, "cube.gltf")["triangles"], 14)
+        touch(self.root, "fake.glb", b"not a glb file at all")
+        with self.assertRaises(ValueError):
+            library.glb_stats(self.root, "fake.glb")
+
+    def test_save_screenshot(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"data"
+        rel = library.save_screenshot(self.root, "赤い/パンダ", io.BytesIO(png), len(png))
+        self.assertRegex(rel, r"^screenshots/screenshot_\d{8}-\d{6}\.png$")
+        rel = library.save_screenshot(self.root, "panda", io.BytesIO(png), len(png))
+        self.assertTrue(rel.startswith("screenshots/panda_"))
+        with self.assertRaises(ValueError):
+            library.save_screenshot(self.root, "x", io.BytesIO(b"GIF89a-not-png"), 14)
+        self.assertEqual(viewer.build_index(self.root), [])
+
     def test_list_and_import_downloads(self):
         downloads = os.path.join(self._tmp.name, "Downloads")
         touch(downloads, "robot.glb", b"robot")
@@ -174,6 +242,16 @@ class ChangeEndpointTests(unittest.TestCase):
         status, res = self.call("PUT", viewer.THUMBNAIL_PATH + "?model=cat.glb", webp)
         self.assertEqual((status, res), (200, {"path": "cat_preview.webp"}))
         self.assertEqual(self.call("PUT", viewer.THUMBNAIL_PATH + "?model=cat.glb", webp, token="")[0], 403)
+
+    def test_meta_and_stats_endpoints(self):
+        touch(self.root, "cube.glb", make_glb(CUBE))
+        status, res = self.call("POST", viewer.META_PATH, json.dumps({"key": "cube.glb", "favorite": True}).encode())
+        self.assertEqual((status, res), (200, {"favorite": True}))
+        index = json.load(urllib.request.urlopen(self.base + viewer.INDEX_PATH))
+        self.assertTrue(index["models"][0]["favorite"])
+        stats = json.load(urllib.request.urlopen(self.base + viewer.STATS_PATH + "?model=cube.glb"))
+        self.assertEqual(stats["triangles"], 14)
+        self.assertEqual(self.call("POST", viewer.META_PATH, b'{"key": "cube.glb"}', token="x")[0], 403)
 
     def test_changes_need_token_and_local_host(self):
         self.assertEqual(self.call("PUT", viewer.UPLOAD_PATH + "?name=a.glb", b"x", token="wrong")[0], 403)

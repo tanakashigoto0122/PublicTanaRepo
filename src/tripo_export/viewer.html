@@ -41,6 +41,12 @@
   .thumb { aspect-ratio: 1; background: var(--stage); display: grid; place-items: center; position: relative; }
   .thumb img { width: 100%; height: 100%; object-fit: contain; }
   .thumb .ph { color: var(--muted); font-size: 12px; }
+  .fav { position: absolute; top: 6px; left: 8px; color: #e8a400; font-size: 16px; text-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .star { border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 8px;
+          padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; align-self: flex-start; }
+  .star.on { color: #c88a00; border-color: #e8a400; }
+  #d-memo { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+            border-radius: 8px; padding: 8px 10px; min-height: 60px; resize: vertical; width: 100%; }
   .badge { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 650; letter-spacing: .04em;
            background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; }
   .meta { padding: 9px 11px 11px; min-width: 0; }
@@ -146,6 +152,11 @@
       <option value="name">名前順</option>
       <option value="size">サイズの大きい順</option>
     </select>
+    <select id="f-folder" aria-label="フォルダ" hidden></select>
+    <select id="f-fav" aria-label="お気に入り">
+      <option value="">すべて</option>
+      <option value="fav">★ お気に入り</option>
+    </select>
   </div>
   <div class="appbar app-only">
     <span class="folder" id="folder"></span>
@@ -173,8 +184,10 @@
     <div class="side">
       <button class="close" id="close" aria-label="閉じる">×</button>
       <h2 id="d-title"></h2>
+      <button class="star" id="d-fav">☆ お気に入り</button>
       <div class="prompt" id="d-prompt" hidden></div>
       <dl id="d-info"></dl>
+      <textarea id="d-memo" placeholder="メモ（検索の対象になります）"></textarea>
       <div class="controls">
         <label><input type="checkbox" id="c-rotate" checked> 自動回転</label>
         <label>背景 <select id="c-bg">
@@ -193,6 +206,7 @@
       </div>
       <div class="edit">
         <button class="btn" id="d-thumb" title="今の表示をこのモデルのサムネイル画像として保存します">この角度をサムネイルに</button>
+        <button class="btn" id="d-shot" title="今の表示を PNG で screenshots フォルダに保存します">画像として保存</button>
         <button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button>
       </div>
       <div class="hint">ドラッグで回転・ホイールで拡大・右ドラッグで移動・← → で前後のモデル・Esc で閉じる。GLB などのファイルは一覧にドラッグ＆ドロップで追加できます</div>
@@ -298,13 +312,22 @@ async function load() {
                 : 'GLB などのファイルをここにドラッグ＆ドロップするか、<code>tripo-export export</code> でダウンロードしてください');
   if (appState) $('folder').textContent = data.root;
   $('sort').value = store.get('tripo-viewer-sort') || 'new';
+  // Folder filter: only worth showing when the models are in more than one folder.
+  const folders = [...new Set(models.map((m) => m.folder))].sort((a, b) => a.localeCompare(b, 'ja'));
+  const picked = $('f-folder').value || store.get('tripo-viewer-folder') || '*';
+  $('f-folder').replaceChildren(new Option('すべてのフォルダ', '*'),
+    ...folders.map((f) => new Option(f ? `📁 ${f}` : '📁 （直下）', f)));
+  $('f-folder').value = folders.includes(picked) ? picked : '*';
+  $('f-folder').hidden = folders.length < 2;
   render();
 }
 
 function render() {
   const q = $('q').value.trim().toLowerCase();
   const sort = $('sort').value;
-  shown = models.filter((m) => !q || [m.title, m.prompt, m.task_id].some((v) => v && v.toLowerCase().includes(q)));
+  const folder = $('f-folder').value, favOnly = $('f-fav').value === 'fav';
+  shown = models.filter((m) => (!q || [m.title, m.prompt, m.task_id, m.memo].some((v) => v && v.toLowerCase().includes(q)))
+    && (folder === '*' || m.folder === folder) && (!favOnly || m.favorite));
   const date = (m) => m.created || m.modified;
   shown.sort({
     new: (a, b) => date(b).localeCompare(date(a)),
@@ -313,7 +336,7 @@ function render() {
     size: (a, b) => totalSize(b) - totalSize(a),
   }[sort]);
 
-  $('count').textContent = q ? `${shown.length} / ${models.length} 件` : `${models.length} 件`;
+  $('count').textContent = shown.length < models.length ? `${shown.length} / ${models.length} 件` : `${models.length} 件`;
   $('empty').hidden = shown.length > 0;
   const grid = $('grid');
   grid.replaceChildren();
@@ -325,6 +348,12 @@ function render() {
     card.querySelector('.title').textContent = label(m);
     card.querySelector('.sub').textContent = `${fmtDate(date(m))} · ${fmtSize(totalSize(m))}`;
     card.title = label(m);
+    if (m.favorite) {
+      const star = document.createElement('span');
+      star.className = 'fav';
+      star.textContent = '★';
+      card.querySelector('.thumb').append(star);
+    }
     const formats = [...new Set(m.files.map((f) => f.format))];
     if (formats.length > 1 || formats[0] !== 'GLB') {
       const b = document.createElement('span');
@@ -451,8 +480,35 @@ function open(i) {
   }));
   $('prev').hidden = $('next').hidden = shown.length < 2;
   $('d-anim-row').hidden = true;
-  $('d-thumb').hidden = !m.model;
+  $('d-thumb').hidden = $('d-shot').hidden = !m.model;
+  showFavorite(m);
+  $('d-memo').value = m.memo || '';
+  if (m.model) showStats(m);
   if (!$('dlg').open) $('dlg').showModal();
+}
+
+function addInfo(label, value) {
+  const dt = document.createElement('dt'); dt.textContent = label;
+  const dd = document.createElement('dd'); dd.textContent = value;
+  $('d-info').append(dt, dd);
+}
+
+// Polygon and texture counts, read by the server from the file (no need to wait for rendering).
+async function showStats(m) {
+  try {
+    const res = await fetch(`/__viewer/stats?model=${encodeURIComponent(m.model)}`);
+    const st = await res.json();
+    if (st.error || shown[current] !== m || !$('dlg').open) return;
+    const n = (v) => v.toLocaleString('ja-JP');
+    addInfo('ポリゴン', `${n(st.triangles)} 三角形 · ${n(st.vertices)} 頂点`);
+    addInfo('中身', `メッシュ ${st.meshes} · マテリアル ${st.materials} · テクスチャ ${st.textures}` +
+                   (st.skins ? ` · リグあり` : '') + (st.animations ? ` · アニメーション ${st.animations}` : ''));
+  } catch { /* stats are a nice-to-have */ }
+}
+
+function showFavorite(m) {
+  $('d-fav').classList.toggle('on', !!m.favorite);
+  $('d-fav').textContent = m.favorite ? '★ お気に入り' : '☆ お気に入りに追加';
 }
 
 // Called when the model has loaded: its size, and its animations (e.g. a rigged Tripo model).
@@ -460,9 +516,7 @@ function showLoaded(mv) {
   if (!mv.isConnected) return;
   const { x, y, z } = mv.getDimensions();
   const fmt = (v) => (v >= 1 ? v.toFixed(2) + ' m' : (v * 100).toFixed(1) + ' cm');
-  const dt = document.createElement('dt'); dt.textContent = '大きさ';
-  const dd = document.createElement('dd'); dd.textContent = `幅 ${fmt(x)} × 高さ ${fmt(y)} × 奥行 ${fmt(z)}`;
-  $('d-info').append(dt, dd);
+  addInfo('大きさ', `幅 ${fmt(x)} × 高さ ${fmt(y)} × 奥行 ${fmt(z)}`);
   const names = mv.availableAnimations || [];
   $('d-anim-row').hidden = !names.length;
   if (!names.length) return;
@@ -486,6 +540,8 @@ $('d-play').onclick = () => {
 };
 
 $('q').oninput = render;
+$('f-folder').onchange = () => { store.set('tripo-viewer-folder', $('f-folder').value); render(); };
+$('f-fav').onchange = render;
 $('sort').onchange = () => { store.set('tripo-viewer-sort', $('sort').value); render(); };
 $('prev').onclick = () => open(current - 1);
 $('next').onclick = () => open(current + 1);
@@ -556,6 +612,38 @@ $('d-thumb').onclick = async () => {
   await load();
   toast('サムネイルを保存しました');
 };
+async function saveMeta(m, values) {
+  try {
+    const entry = await change('/__viewer/meta', { method: 'POST', body: JSON.stringify({ key: m.key, ...values }) });
+    m.favorite = !!entry.favorite;
+    m.memo = entry.memo || '';
+  } catch (err) { toast(`保存できませんでした: ${err.message}`, true); }
+}
+$('d-fav').onclick = async () => {
+  const m = shown[current];
+  await saveMeta(m, { favorite: !m.favorite });
+  showFavorite(m);
+};
+// Saved while typing (Esc closes the dialog without a change event); the list catches up on close.
+let memoTimer;
+$('d-memo').oninput = () => {
+  const m = shown[current], memo = $('d-memo').value;
+  clearTimeout(memoTimer);
+  memoTimer = setTimeout(() => saveMeta(m, { memo }), 600);
+};
+$('dlg').addEventListener('close', () => render());
+$('d-shot').onclick = async () => {
+  const m = shown[current];
+  const mv = $('stage').querySelector('model-viewer');
+  if (!mv?.loaded) return toast('モデルの読み込みが終わってから押してください', true);
+  let res;
+  try {
+    const blob = await mv.toBlob({ mimeType: 'image/png' });
+    res = await change(`/__viewer/screenshot?name=${encodeURIComponent(label(m))}`, { method: 'PUT', body: blob });
+  } catch (err) { return toast(`保存できませんでした: ${err.message}`, true); }
+  toast(`保存しました: ${res.path}`);
+  if (appState) api().reveal(res.path);
+};
 $('d-delete').onclick = async () => {
   const m = shown[current];
   const again = m.task_id ? '\n（API から一括エクスポートすると、もう一度ダウンロードされます）' : '';
@@ -608,7 +696,7 @@ document.addEventListener('drop', async (e) => {
   else toast(`${added} 個追加しました${extra}`);
 });
 document.addEventListener('keydown', (e) => {
-  if (!$('dlg').open) return;
+  if (!$('dlg').open || e.target.matches('textarea, input, select')) return;
   if (e.key === 'ArrowLeft') open(current - 1);
   if (e.key === 'ArrowRight') open(current + 1);
 });

@@ -9,8 +9,10 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
-from typing import Any, BinaryIO, Dict, List, Tuple
+from datetime import datetime
+from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 from .exporter import MANIFEST_NAME
 
@@ -21,6 +23,10 @@ IMAGE_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
 PREVIEW_SUFFIX = "_preview"
 DATE_PREFIX = re.compile(r"^(\d{8}-\d{6})_(.+)$")
 TRASH_DIR = ".trash"
+# Favorites and memos, keyed by each model's main file (relative path). A dot file, so the
+# folder can move between PCs with it and the index skips it.
+META_NAME = ".tripo-viewer.json"
+SCREENSHOT_DIR = "screenshots"
 # Characters Windows does not allow in file names, plus control characters.
 _BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _COPY_CHUNK = 1024 * 1024
@@ -125,10 +131,57 @@ def _update_manifest(root: str, renames: Dict[str, str]) -> None:
             entry["file"] = renames[entry["file"]]
             changed = True
     if changed:
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as handle:
-            json.dump(entries, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        os.replace(tmp, path)
+        _write_json(path, entries)
+
+
+def _write_json(path: str, data: Any) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def read_meta(root: str) -> Dict[str, Dict[str, Any]]:
+    """``{main file: {"favorite": bool, "memo": str}}``; empty when there is no or a broken file."""
+    try:
+        with open(os.path.join(root, META_NAME), encoding="utf-8") as handle:
+            data = json.load(handle).get("models")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_meta(root: str, meta: Dict[str, Dict[str, Any]]) -> None:
+    _write_json(os.path.join(root, META_NAME), {"models": {k: v for k, v in meta.items() if v}})
+
+
+def set_meta(root: str, key: str, favorite: Optional[bool] = None, memo: Optional[str] = None) -> Dict[str, Any]:
+    """Set the favorite flag and/or memo of the model whose main file is ``key``."""
+    if not os.path.isfile(safe_path(root, key)):
+        raise ValueError(f"モデルが見つかりません: {key}")
+    meta = read_meta(root)
+    entry = dict(meta.get(key) or {})
+    if favorite is not None:
+        entry["favorite"] = bool(favorite)
+    if memo is not None:
+        entry["memo"] = str(memo).strip()
+    entry = {k: v for k, v in entry.items() if v}
+    meta[key] = entry
+    _save_meta(root, meta)
+    return entry
+
+
+def _move_meta(root: str, renames: Dict[str, Optional[str]]) -> None:
+    """Follow renamed files (or drop deleted ones, mapped to None) in the meta file."""
+    meta = read_meta(root)
+    if not any(key in meta for key in renames):
+        return
+    for old, new in renames.items():
+        if old in meta:
+            entry = meta.pop(old)
+            if new:
+                meta[new] = entry
+    _save_meta(root, meta)
 
 
 def rename_model(root: str, files: List[str], new_name: str) -> Dict[str, str]:
@@ -161,6 +214,7 @@ def rename_model(root: str, files: List[str], new_name: str) -> Dict[str, str]:
         os.replace(path, target)
         renames[_rel(root, path)] = _rel(root, target)
     _update_manifest(root, renames)
+    _move_meta(root, dict(renames))
     return renames
 
 
@@ -195,12 +249,15 @@ def delete_model(root: str, files: List[str]) -> str:
         raise ValueError("削除するファイルがありません")
     if sys.platform == "win32":
         _recycle_windows(paths)
-        return "ごみ箱"
-    trash = os.path.join(os.path.abspath(root), TRASH_DIR)
-    os.makedirs(trash, exist_ok=True)
-    for path in paths:
-        os.replace(path, unique_path(os.path.join(trash, os.path.basename(path))))
-    return TRASH_DIR
+        where = "ごみ箱"
+    else:
+        trash = os.path.join(os.path.abspath(root), TRASH_DIR)
+        os.makedirs(trash, exist_ok=True)
+        for path in paths:
+            os.replace(path, unique_path(os.path.join(trash, os.path.basename(path))))
+        where = TRASH_DIR
+    _move_meta(root, {_rel(root, p): None for p in paths})
+    return where
 
 
 def downloads_dir() -> str:
@@ -269,3 +326,74 @@ def import_files(source: str, names: List[str], root: str, move: bool = False) -
         except (ValueError, OSError) as exc:
             errors[name] = str(exc) or type(exc).__name__
     return added, errors
+
+
+_GLB_MAGIC = 0x46546C67
+_GLB_JSON_CHUNK = 0x4E4F534A
+_TRIANGLES = 4
+
+
+def _gltf_json(path: str) -> Dict[str, Any]:
+    """The JSON part of a .glb (only the header and JSON chunk are read) or a whole .gltf."""
+    with open(path, "rb") as handle:
+        if path.lower().endswith(".gltf"):
+            return json.load(handle)
+        header = handle.read(20)
+        if len(header) < 20:
+            raise ValueError("GLB ファイルが短すぎます")
+        magic, _version, _length, chunk_length, chunk_type = struct.unpack("<5I", header)
+        if magic != _GLB_MAGIC or chunk_type != _GLB_JSON_CHUNK:
+            raise ValueError("GLB ファイルではありません")
+        return json.loads(handle.read(chunk_length))
+
+
+def glb_stats(root: str, model: str) -> Dict[str, int]:
+    """Triangle, vertex, material, texture and animation counts of a .glb/.gltf.
+
+    Counted per mesh, as stored (a mesh drawn twice by two nodes counts once).
+    """
+    path = safe_path(root, model)
+    if os.path.splitext(path)[1].lower() not in VIEWABLE:
+        raise ValueError("GLB / glTF だけ対応しています")
+    gltf = _gltf_json(path)
+    accessors = gltf.get("accessors") or []
+
+    def count(index: Any) -> int:
+        try:
+            return int(accessors[index]["count"])
+        except (IndexError, KeyError, TypeError, ValueError):
+            return 0
+
+    triangles = vertices = 0
+    for mesh in gltf.get("meshes") or []:
+        for prim in mesh.get("primitives") or []:
+            points = count((prim.get("attributes") or {}).get("POSITION"))
+            vertices += points
+            if prim.get("mode", _TRIANGLES) == _TRIANGLES:
+                indices = prim.get("indices")
+                triangles += (count(indices) if indices is not None else points) // 3
+    return {"triangles": triangles, "vertices": vertices, "meshes": len(gltf.get("meshes") or []),
+            "materials": len(gltf.get("materials") or []), "textures": len(gltf.get("images") or []),
+            "animations": len(gltf.get("animations") or []), "skins": len(gltf.get("skins") or [])}
+
+
+MAX_SCREENSHOT_BYTES = 50 * 1024 * 1024
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def save_screenshot(root: str, name: str, stream: BinaryIO, length: int) -> str:
+    """Save a PNG as ``screenshots/<name>_<date-time>.png`` in ``root``; returns its relative path."""
+    if not len(_PNG_MAGIC) < length <= MAX_SCREENSHOT_BYTES:
+        raise ValueError("画像が空か、大きすぎます")
+    data = stream.read(length)
+    if len(data) != length or not data.startswith(_PNG_MAGIC):
+        raise ValueError("PNG 画像ではありません")
+    try:
+        name = check_name(name)
+    except ValueError:
+        name = "screenshot"
+    folder = safe_path(root, SCREENSHOT_DIR)
+    os.makedirs(folder, exist_ok=True)
+    path = unique_path(os.path.join(folder, f"{name}_{datetime.now():%Y%m%d-%H%M%S}.png"))
+    _write(path, io.BytesIO(data), length)
+    return _rel(root, path)

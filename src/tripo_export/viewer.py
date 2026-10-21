@@ -28,6 +28,9 @@ INDEX_PATH = "/__viewer/models.json"
 MODEL_VIEWER_PATH = "/__viewer/model-viewer.min.js"
 UPLOAD_PATH = "/__viewer/upload"
 THUMBNAIL_PATH = "/__viewer/thumbnail"
+SCREENSHOT_PATH = "/__viewer/screenshot"
+META_PATH = "/__viewer/meta"
+STATS_PATH = "/__viewer/stats"
 RENAME_PATH = "/__viewer/rename"
 DELETE_PATH = "/__viewer/delete"
 TOKEN_HEADER = "X-Viewer-Token"
@@ -100,9 +103,16 @@ def build_index(root: str) -> List[Dict[str, Any]]:
             if ext in VIEWABLE and item["model"] is None:
                 item["model"] = rel
 
+    meta = library.read_meta(root)
     result = []
     for item in models.values():
         item["preview"] = next((previews[s] for s in item.pop("_stems") if s in previews), None)
+        # The main file names the model for favorites and memos, and its folder is the filter.
+        key = item["model"] or item["files"][0]["path"]
+        item["key"] = key
+        item["folder"] = key.rpartition("/")[0]
+        item["favorite"] = bool((meta.get(key) or {}).get("favorite"))
+        item["memo"] = (meta.get(key) or {}).get("memo") or ""
         result.append(item)
     result.sort(key=lambda m: m["created"] or m["modified"], reverse=True)
     return result
@@ -125,6 +135,14 @@ class _Handler(SimpleHTTPRequestHandler):
             self._send(body, "application/json; charset=utf-8")
         elif path == MODEL_VIEWER_PATH:
             self._send(_asset("vendor/model-viewer.min.js"), "text/javascript; charset=utf-8", cache=True)
+        elif path == STATS_PATH:
+            model = (parse_qs(urlsplit(self.path).query).get("model") or [""])[0]
+            try:
+                result, status = library.glb_stats(self.directory, model), 200
+            except (ValueError, OSError) as exc:
+                result, status = {"error": str(exc)}, 400
+            self._send(json.dumps(result, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8",
+                       status=status)
         else:
             super().do_GET()
 
@@ -136,6 +154,9 @@ class _Handler(SimpleHTTPRequestHandler):
             if url.path == THUMBNAIL_PATH:
                 model = (query.get("model") or [""])[0]
                 return {"path": library.save_preview(self.directory, model, self.rfile, length)}
+            if url.path == SCREENSHOT_PATH:
+                name = (query.get("name") or [""])[0]
+                return {"path": library.save_screenshot(self.directory, name, self.rfile, length)}
             if url.path != UPLOAD_PATH:
                 raise LookupError(self.path)
             if not 0 < length <= MAX_UPLOAD_BYTES:
@@ -154,6 +175,9 @@ class _Handler(SimpleHTTPRequestHandler):
                 return {"renamed": library.rename_model(self.directory, files, str(body.get("name") or ""))}
             if path == DELETE_PATH:
                 return {"moved_to": library.delete_model(self.directory, files)}
+            if path == META_PATH:
+                return library.set_meta(self.directory, str(body.get("key") or ""),
+                                        favorite=body.get("favorite"), memo=body.get("memo"))
             raise LookupError(path)
 
         self._change(change)
