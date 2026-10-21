@@ -56,7 +56,10 @@ Key constraints of the Tripo API that shape the design:
   detail panel renames (`POST /__viewer/rename`) and deletes (`POST /__viewer/delete`) a model.
   These need the per-server token (`ViewerServer.token`, written into the page in place of
   `__VIEWER_TOKEN__`) in `X-Viewer-Token` and a `127.0.0.1`/`localhost` Host header, so other web
-  pages cannot change the folder. Background, lighting and exposure of the 3D view are kept in localStorage.
+  pages cannot change the folder. `PUT /__viewer/thumbnail?model=` saves the current view (WebP from
+  `toBlob`) as `<stem>_preview.webp`. Background, lighting and exposure of the 3D view are kept in
+  localStorage. The page re-reads the index every 3 s and re-renders when it changed, unless a
+  dialog is open, so files added in Explorer show up on their own.
 - `src/tripo_export/library.py`: the file operations behind those endpoints and the app's
   "import from Downloads". Paths from the page go through `safe_path`. Renaming keeps the
   exporter's `<date>_` prefix and the `_preview` suffix and updates `manifest.json`. Deleting

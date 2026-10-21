@@ -27,6 +27,7 @@ from .library import DATE_PREFIX, IMAGE_EXTENSIONS, MODEL_EXTENSIONS, PREVIEW_SU
 INDEX_PATH = "/__viewer/models.json"
 MODEL_VIEWER_PATH = "/__viewer/model-viewer.min.js"
 UPLOAD_PATH = "/__viewer/upload"
+THUMBNAIL_PATH = "/__viewer/thumbnail"
 RENAME_PATH = "/__viewer/rename"
 DELETE_PATH = "/__viewer/delete"
 TOKEN_HEADER = "X-Viewer-Token"
@@ -129,12 +130,17 @@ class _Handler(SimpleHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         def upload() -> Dict[str, Any]:
-            if urlsplit(self.path).path != UPLOAD_PATH:
-                raise LookupError(self.path)
-            name = (parse_qs(urlsplit(self.path).query).get("name") or [""])[0]
+            url = urlsplit(self.path)
+            query = parse_qs(url.query)
             length = int(self.headers.get("Content-Length") or 0)
+            if url.path == THUMBNAIL_PATH:
+                model = (query.get("model") or [""])[0]
+                return {"path": library.save_preview(self.directory, model, self.rfile, length)}
+            if url.path != UPLOAD_PATH:
+                raise LookupError(self.path)
             if not 0 < length <= MAX_UPLOAD_BYTES:
                 raise ValueError("ファイルが空か、大きすぎます")
+            name = (query.get("name") or [""])[0]
             return {"path": library.add_file(self.directory, name, self.rfile, length)}
 
         self._change(upload)

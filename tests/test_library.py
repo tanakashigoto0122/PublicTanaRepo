@@ -90,6 +90,26 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(library.delete_model(self.root, ["a.glb"]), "ごみ箱")
         self.assertEqual(os.listdir(self.root), [])
 
+    def test_save_preview_replaces_thumbnail(self):
+        touch(self.root, "studio/cat.glb")
+        webp = b"RIFF\x10\x00\x00\x00WEBPVP8 data"
+        rel = library.save_preview(self.root, "studio/cat.glb", io.BytesIO(webp), len(webp))
+        self.assertEqual(rel, "studio/cat_preview.webp")
+        rel = library.save_preview(self.root, "studio/cat.glb", io.BytesIO(webp + b"!"), len(webp) + 1)
+        with open(os.path.join(self.root, "studio", "cat_preview.webp"), "rb") as handle:
+            self.assertEqual(handle.read(), webp + b"!")
+        [item] = viewer.build_index(self.root)
+        self.assertEqual(item["preview"], "studio/cat_preview.webp")
+
+    def test_save_preview_checks_model_and_image(self):
+        touch(self.root, "cat.glb")
+        webp = b"RIFF\x10\x00\x00\x00WEBPVP8 data"
+        with self.assertRaises(ValueError):
+            library.save_preview(self.root, "dog.glb", io.BytesIO(webp), len(webp))
+        with self.assertRaises(ValueError):
+            library.save_preview(self.root, "cat.glb", io.BytesIO(b"<svg>not webp</svg>"), 19)
+        self.assertEqual(os.listdir(self.root), ["cat.glb"])
+
     def test_list_and_import_downloads(self):
         downloads = os.path.join(self._tmp.name, "Downloads")
         touch(downloads, "robot.glb", b"robot")
@@ -147,6 +167,13 @@ class ChangeEndpointTests(unittest.TestCase):
             status, res = self.call("POST", viewer.DELETE_PATH, json.dumps({"files": ["cat.glb"]}).encode())
         self.assertEqual(status, 200)
         self.assertEqual(os.listdir(os.path.join(self.root, ".trash")), ["cat.glb"])
+
+    def test_thumbnail_endpoint(self):
+        touch(self.root, "cat.glb")
+        webp = b"RIFF\x10\x00\x00\x00WEBPVP8 data"
+        status, res = self.call("PUT", viewer.THUMBNAIL_PATH + "?model=cat.glb", webp)
+        self.assertEqual((status, res), (200, {"path": "cat_preview.webp"}))
+        self.assertEqual(self.call("PUT", viewer.THUMBNAIL_PATH + "?model=cat.glb", webp, token="")[0], 403)
 
     def test_changes_need_token_and_local_host(self):
         self.assertEqual(self.call("PUT", viewer.UPLOAD_PATH + "?name=a.glb", b"x", token="wrong")[0], 403)

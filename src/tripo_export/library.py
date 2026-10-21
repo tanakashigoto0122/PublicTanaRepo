@@ -4,6 +4,7 @@ The viewer server and the desktop app call these. Every path the page sends is r
 folder and is checked to stay inside it.
 """
 
+import io
 import json
 import os
 import re
@@ -68,6 +69,12 @@ def add_file(root: str, name: str, stream: BinaryIO, length: int) -> str:
     if not is_model_file(name):
         raise ValueError(f"モデルファイルではありません: {name}（対応: {', '.join(e[1:].upper() for e in MODEL_EXTENSIONS)}）")
     path = unique_path(safe_path(root, name))
+    _write(path, stream, length)
+    return _rel(root, path)
+
+
+def _write(path: str, stream: BinaryIO, length: int) -> None:
+    # Through a temporary name, so a cut-off upload never leaves a file that looks complete.
     part = path + ".part"
     try:
         with open(part, "wb") as handle:
@@ -82,7 +89,27 @@ def add_file(root: str, name: str, stream: BinaryIO, length: int) -> str:
     finally:
         if os.path.exists(part):
             os.remove(part)
-    return _rel(root, path)
+
+
+MAX_PREVIEW_BYTES = 20 * 1024 * 1024
+
+
+def save_preview(root: str, model: str, stream: BinaryIO, length: int) -> str:
+    """Save a WebP image as the thumbnail of ``model`` (``<stem>_preview.webp``, replacing one there).
+
+    Returns the image's relative path.
+    """
+    path = safe_path(root, model)
+    if not (is_model_file(model) and os.path.isfile(path)):
+        raise ValueError(f"モデルが見つかりません: {model}")
+    if not 12 <= length <= MAX_PREVIEW_BYTES:
+        raise ValueError("画像が空か、大きすぎます")
+    data = stream.read(length)
+    if len(data) != length or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise ValueError("WebP 画像ではありません")
+    target = os.path.splitext(path)[0] + PREVIEW_SUFFIX + ".webp"
+    _write(target, io.BytesIO(data), length)
+    return _rel(root, target)
 
 
 def _update_manifest(root: str, renames: Dict[str, str]) -> None:

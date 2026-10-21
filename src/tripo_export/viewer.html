@@ -71,7 +71,7 @@
   .controls label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
   .controls select { padding: 3px 6px; font-size: 13px; }
   .controls input[type=range] { width: 110px; accent-color: var(--accent); }
-  .edit { display: flex; gap: 8px; }
+  .edit { display: flex; flex-wrap: wrap; gap: 8px; }
   .btn.danger { color: var(--danger); }
   .dropzone { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; pointer-events: none;
               background: color-mix(in srgb, var(--accent) 18%, transparent); border: 3px dashed var(--accent);
@@ -187,7 +187,14 @@
         <label>明るさ <input type="range" id="c-exposure" min="0.3" max="2.5" step="0.1" value="1"></label>
       </div>
       <div class="files" id="d-files"></div>
-      <div class="edit"><button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button></div>
+      <div class="controls" id="d-anim-row" hidden>
+        <label>アニメーション <select id="d-anim"></select></label>
+        <button class="btn" id="d-play">一時停止</button>
+      </div>
+      <div class="edit">
+        <button class="btn" id="d-thumb" title="今の表示をこのモデルのサムネイル画像として保存します">この角度をサムネイルに</button>
+        <button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button>
+      </div>
       <div class="hint">ドラッグで回転・ホイールで拡大・右ドラッグで移動・← → で前後のモデル・Esc で閉じる。GLB などのファイルは一覧にドラッグ＆ドロップで追加できます</div>
     </div>
   </div>
@@ -274,17 +281,21 @@ const store = {
 };
 
 let models = [], shown = [], current = -1;
+let lastIndex = '';
+// Appended to preview image URLs; renewed when a thumbnail is replaced so the new one is fetched.
+let previewVersion = Date.now();
 
 async function load() {
   const res = await fetch('/__viewer/models.json', { cache: 'no-store' });
-  const data = await res.json();
+  lastIndex = await res.text();
+  const data = JSON.parse(lastIndex);
   models = data.models;
   document.title = `Tripo モデル一覧 (${models.length})`;
   $('empty').innerHTML = models.length
     ? '一致するモデルがありません'
     : `このフォルダにはモデルがありません<br><br><code>${data.root.replace(/[<&]/g, '')}</code><br><br>` +
-      (appState ? '「API から一括エクスポート」か「モデルを生成」で追加するか、GLB ファイルをこのフォルダに入れてください'
-                : '<code>tripo-export export</code> でダウンロードしてから開いてください');
+      (appState ? 'GLB などのファイルをここにドラッグ＆ドロップするか、「ダウンロードから取り込む」「API から一括エクスポート」「モデルを生成」で追加してください'
+                : 'GLB などのファイルをここにドラッグ＆ドロップするか、<code>tripo-export export</code> でダウンロードしてください');
   if (appState) $('folder').textContent = data.root;
   $('sort').value = store.get('tripo-viewer-sort') || 'new';
   render();
@@ -340,7 +351,7 @@ function showImg(card, src) {
 const queue = [];
 let busy = false;
 function setThumb(card, m) {
-  if (m.preview) return showImg(card, url(m.preview));
+  if (m.preview) return showImg(card, `${url(m.preview)}?v=${previewVersion}`);
   if (!m.model) return;
   const key = `tripo-thumb:${m.model}:${totalSize(m)}:${m.modified}`;
   const cached = store.get(key);
@@ -401,6 +412,7 @@ function open(i) {
     mv.setAttribute('interaction-prompt', 'none');
     if ($('c-rotate').checked) mv.setAttribute('auto-rotate', '');
     applyLook(mv);
+    mv.addEventListener('load', () => showLoaded(mv), { once: true });
     mv.src = url(m.model);
     stage.prepend(mv);
   } else {
@@ -438,8 +450,40 @@ function open(i) {
     return a;
   }));
   $('prev').hidden = $('next').hidden = shown.length < 2;
+  $('d-anim-row').hidden = true;
+  $('d-thumb').hidden = !m.model;
   if (!$('dlg').open) $('dlg').showModal();
 }
+
+// Called when the model has loaded: its size, and its animations (e.g. a rigged Tripo model).
+function showLoaded(mv) {
+  if (!mv.isConnected) return;
+  const { x, y, z } = mv.getDimensions();
+  const fmt = (v) => (v >= 1 ? v.toFixed(2) + ' m' : (v * 100).toFixed(1) + ' cm');
+  const dt = document.createElement('dt'); dt.textContent = '大きさ';
+  const dd = document.createElement('dd'); dd.textContent = `幅 ${fmt(x)} × 高さ ${fmt(y)} × 奥行 ${fmt(z)}`;
+  $('d-info').append(dt, dd);
+  const names = mv.availableAnimations || [];
+  $('d-anim-row').hidden = !names.length;
+  if (!names.length) return;
+  $('d-anim').replaceChildren(...names.map((n) => new Option(n, n)));
+  mv.animationName = names[0];
+  mv.play();
+  $('d-play').textContent = '一時停止';
+}
+$('d-anim').onchange = () => {
+  const mv = $('stage').querySelector('model-viewer');
+  if (!mv) return;
+  mv.animationName = $('d-anim').value;
+  mv.play();
+  $('d-play').textContent = '一時停止';
+};
+$('d-play').onclick = () => {
+  const mv = $('stage').querySelector('model-viewer');
+  if (!mv) return;
+  if (mv.paused) mv.play(); else mv.pause();
+  $('d-play').textContent = mv.paused ? '再生' : '一時停止';
+};
 
 $('q').oninput = render;
 $('sort').onchange = () => { store.set('tripo-viewer-sort', $('sort').value); render(); };
@@ -500,6 +544,18 @@ $('d-rename').onclick = async () => {
   if (i >= 0) open(i); else $('dlg').close();
   toast('名前を変更しました');
 };
+$('d-thumb').onclick = async () => {
+  const m = shown[current];
+  const mv = $('stage').querySelector('model-viewer');
+  if (!mv?.loaded) return toast('モデルの読み込みが終わってから押してください', true);
+  try {
+    const blob = await mv.toBlob({ mimeType: 'image/webp', qualityArgument: 0.85, idealAspect: true });
+    await change(`/__viewer/thumbnail?model=${encodeURIComponent(m.model)}`, { method: 'PUT', body: blob });
+  } catch (err) { return toast(`サムネイルを保存できませんでした: ${err.message}`, true); }
+  previewVersion = Date.now();
+  await load();
+  toast('サムネイルを保存しました');
+};
 $('d-delete').onclick = async () => {
   const m = shown[current];
   const again = m.task_id ? '\n（API から一括エクスポートすると、もう一度ダウンロードされます）' : '';
@@ -512,6 +568,16 @@ $('d-delete').onclick = async () => {
   await load();
   toast(res.moved_to === 'ごみ箱' ? 'ごみ箱に移動しました' : `フォルダ内の ${res.moved_to} に移動しました`);
 };
+
+// Pick up files added or removed outside the page (Explorer, an export in a terminal),
+// but not while a dialog is open, so nothing moves under the user.
+setInterval(async () => {
+  if (document.hidden || document.querySelector('dialog[open]')) return;
+  try {
+    const res = await fetch('/__viewer/models.json', { cache: 'no-store' });
+    if ((await res.text()) !== lastIndex) await load();
+  } catch { /* server gone (window closing): nothing to refresh */ }
+}, 3000);
 
 let dragDepth = 0;
 const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
