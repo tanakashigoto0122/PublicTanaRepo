@@ -33,6 +33,7 @@ META_PATH = "/__viewer/meta"
 STATS_PATH = "/__viewer/stats"
 RENAME_PATH = "/__viewer/rename"
 DELETE_PATH = "/__viewer/delete"
+MOVE_PATH = "/__viewer/move"
 TOKEN_HEADER = "X-Viewer-Token"
 TOKEN_PLACEHOLDER = b"__VIEWER_TOKEN__"
 MAX_UPLOAD_BYTES = 2 * 1024 ** 3
@@ -175,6 +176,8 @@ class _Handler(SimpleHTTPRequestHandler):
                 return {"renamed": library.rename_model(self.directory, files, str(body.get("name") or ""))}
             if path == DELETE_PATH:
                 return {"moved_to": library.delete_model(self.directory, files)}
+            if path == MOVE_PATH:
+                return {"moved": library.move_model(self.directory, files, str(body.get("folder") or ""))}
             if path == META_PATH:
                 return library.set_meta(self.directory, str(body.get("key") or ""),
                                         favorite=body.get("favorite"), memo=body.get("memo"))

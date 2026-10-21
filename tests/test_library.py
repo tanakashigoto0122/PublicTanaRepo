@@ -7,6 +7,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+import zipfile
 from unittest import mock
 
 from tripo_export import library, viewer
@@ -37,6 +38,13 @@ CUBE = {
     "accessors": [{"count": 8}, {"count": 36}, {"count": 6}],
     "materials": [{}, {}], "images": [{}], "animations": [{}], "skins": [{}],
 }
+
+
+def make_zip(path, members):
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    return path
 
 
 class LibraryTests(unittest.TestCase):
@@ -178,6 +186,69 @@ class LibraryTests(unittest.TestCase):
             library.save_screenshot(self.root, "x", io.BytesIO(b"GIF89a-not-png"), 14)
         self.assertEqual(viewer.build_index(self.root), [])
 
+    def test_zip_is_unpacked_into_its_own_folder(self):
+        zip_path = make_zip(os.path.join(self._tmp.name, "panda.zip"), {
+            "panda/model.fbx": b"fbx", "panda/textures/base.png": b"png",
+            "__MACOSX/panda/._model.fbx": b"junk", "panda/.DS_Store": b"junk"})
+        with open(zip_path, "rb") as handle:
+            rel = library.add_file(self.root, "panda.zip", handle, os.path.getsize(zip_path))
+        self.assertEqual(rel, "panda")
+        found = sorted(os.path.relpath(os.path.join(d, f), self.root).replace(os.sep, "/")
+                       for d, _, names in os.walk(self.root) for f in names)
+        self.assertEqual(found, ["panda/panda/model.fbx", "panda/panda/textures/base.png"])
+        self.assertEqual([i["folder"] for i in viewer.build_index(self.root)], ["panda/panda"])
+
+    def test_zip_without_models_or_escaping_paths_is_refused(self):
+        no_model = make_zip(os.path.join(self._tmp.name, "pics.zip"), {"a.png": b"png"})
+        with self.assertRaises(ValueError):
+            library.extract_zip(no_model, self.root, "pics.zip")
+        evil = make_zip(os.path.join(self._tmp.name, "evil.zip"), {"ok.glb": b"glb", "../../escape.txt": b"x"})
+        with self.assertRaises(ValueError):
+            library.extract_zip(evil, self.root, "evil.zip")
+        self.assertFalse(os.path.exists(os.path.join(self._tmp.name, "escape.txt")))
+        self.assertEqual(os.listdir(self.root), [])
+        with self.assertRaises(ValueError):
+            library.extract_zip(os.path.join(self._tmp.name, "pics.zip"), self.root, "../up.zip")
+
+    def test_import_zip_from_downloads(self):
+        downloads = os.path.join(self._tmp.name, "Downloads")
+        os.makedirs(downloads)
+        make_zip(os.path.join(downloads, "robot.zip"), {"robot.glb": b"glb", "robot.png": b"png"})
+        make_zip(os.path.join(downloads, "photos.zip"), {"a.png": b"png"})
+        [item] = library.list_importable(downloads, self.root)
+        self.assertEqual((item["name"], item["zip"], item["models"], item["imported"]), ("robot.zip", True, 1, False))
+        added, errors = library.import_files(downloads, ["robot.zip"], self.root, move=True)
+        self.assertEqual((added, errors), (["robot"], {}))
+        self.assertTrue(os.path.exists(os.path.join(self.root, "robot", "robot.glb")))
+        self.assertFalse(os.path.exists(os.path.join(downloads, "robot.zip")))
+
+    def test_move_model_keeps_manifest_and_meta(self):
+        touch(self.root, "20251009-120000_abc.glb")
+        touch(self.root, "20251009-120000_abc_preview.webp")
+        with open(os.path.join(self.root, "manifest.json"), "w") as handle:
+            json.dump({"abc:GLB": {"task_id": "abc", "format": "GLB", "file": "20251009-120000_abc.glb"}}, handle)
+        library.set_meta(self.root, "20251009-120000_abc.glb", favorite=True)
+        files = ["20251009-120000_abc.glb", "20251009-120000_abc_preview.webp"]
+        library.move_model(self.root, files, "game/props")
+        [item] = viewer.build_index(self.root)
+        self.assertEqual((item["folder"], item["task_id"], item["favorite"]), ("game/props", "abc", True))
+        self.assertEqual(item["preview"], "game/props/20251009-120000_abc_preview.webp")
+        with open(os.path.join(self.root, "manifest.json")) as handle:
+            self.assertEqual(json.load(handle)["abc:GLB"]["file"], "game/props/20251009-120000_abc.glb")
+        library.move_model(self.root, ["game/props/20251009-120000_abc.glb",
+                                       "game/props/20251009-120000_abc_preview.webp"], "")
+        self.assertTrue(os.path.exists(os.path.join(self.root, "20251009-120000_abc.glb")))
+
+    def test_move_model_refuses_collisions_and_bad_folders(self):
+        touch(self.root, "cat.glb")
+        touch(self.root, "box/cat.glb")
+        with self.assertRaises(ValueError):
+            library.move_model(self.root, ["cat.glb"], "box")
+        for bad in ("..", "a/../..", "x:y"):
+            with self.assertRaises(ValueError):
+                library.move_model(self.root, ["cat.glb"], bad)
+        self.assertTrue(os.path.exists(os.path.join(self.root, "cat.glb")))
+
     def test_list_and_import_downloads(self):
         downloads = os.path.join(self._tmp.name, "Downloads")
         touch(downloads, "robot.glb", b"robot")
@@ -252,6 +323,11 @@ class ChangeEndpointTests(unittest.TestCase):
         stats = json.load(urllib.request.urlopen(self.base + viewer.STATS_PATH + "?model=cube.glb"))
         self.assertEqual(stats["triangles"], 14)
         self.assertEqual(self.call("POST", viewer.META_PATH, b'{"key": "cube.glb"}', token="x")[0], 403)
+
+    def test_move_endpoint(self):
+        touch(self.root, "cat.glb")
+        status, res = self.call("POST", viewer.MOVE_PATH, json.dumps({"files": ["cat.glb"], "folder": "animals"}).encode())
+        self.assertEqual((status, res), (200, {"moved": {"cat.glb": "animals/cat.glb"}}))
 
     def test_changes_need_token_and_local_host(self):
         self.assertEqual(self.call("PUT", viewer.UPLOAD_PATH + "?name=a.glb", b"x", token="wrong")[0], 403)

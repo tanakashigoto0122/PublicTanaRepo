@@ -37,6 +37,21 @@
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; cursor: pointer;
           box-shadow: var(--shadow); transition: transform .12s ease, border-color .12s ease; text-align: left; padding: 0;
           font: inherit; color: inherit; display: flex; flex-direction: column; }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .check { position: absolute; bottom: 8px; left: 8px; width: 22px; height: 22px; border-radius: 6px; display: grid;
+           place-items: center; background: var(--surface); border: 1px solid var(--border); font-size: 14px; color: var(--accent); }
+  body:not(.selecting) .check { display: none; }
+  .selbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; padding: 10px 12px;
+            background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; font-size: 13px; }
+  .selbar .n { font-weight: 650; margin-right: auto; }
+  .btn.on { border-color: var(--accent); color: var(--accent); }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); height: min(640px, calc(100vh - 80px)); }
+  .compare > div { position: relative; background: var(--stage); }
+  .compare model-viewer { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .compare .cap { position: absolute; left: 10px; right: 10px; bottom: 8px; z-index: 2; font-size: 12px; background: var(--surface);
+                  border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; }
+  .comparebar { display: flex; gap: 12px; align-items: center; padding: 10px 14px; font-size: 13px; }
+  .comparebar .t { font-weight: 650; margin-right: auto; }
   .card:hover, .card:focus-visible { transform: translateY(-2px); border-color: var(--accent); outline: none; }
   .thumb { aspect-ratio: 1; background: var(--stage); display: grid; place-items: center; position: relative; }
   .thumb img { width: 100%; height: 100%; object-fit: contain; }
@@ -157,6 +172,7 @@
       <option value="">すべて</option>
       <option value="fav">★ お気に入り</option>
     </select>
+    <button class="btn" id="sel-toggle" title="複数のモデルを選んで、まとめて操作します（Ctrl+クリックでも選べます）">選択</button>
   </div>
   <div class="appbar app-only">
     <span class="folder" id="folder"></span>
@@ -171,6 +187,15 @@
   </div>
 </header>
 <main>
+  <div class="selbar" id="selbar" hidden>
+    <span class="n" id="sel-n"></span>
+    <button class="btn" id="sel-all">表示中をすべて選択</button>
+    <button class="btn" id="sel-fav">★ お気に入りにする</button>
+    <button class="btn" id="sel-move">フォルダへ移動…</button>
+    <button class="btn" id="sel-compare" title="2 個選ぶと並べて見比べられます">並べて比較</button>
+    <button class="btn danger" id="sel-delete">削除</button>
+    <button class="btn" id="sel-clear">選択をやめる</button>
+  </div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
 </main>
@@ -252,7 +277,7 @@
 
 <dialog class="form app-only" id="dlg-import">
   <h3>ダウンロードから取り込む</h3>
-  <p class="note">Tripo Studio（Web 版）などで保存したモデルを、ダウンロードフォルダから表示中のフォルダにコピーします。<br><span class="path" id="i-source"></span></p>
+  <p class="note">Tripo Studio（Web 版）などで保存したモデルを、ダウンロードフォルダから表示中のフォルダにコピーします。zip はフォルダに展開します（FBX・OBJ のテクスチャもそのまま入ります）。<br><span class="path" id="i-source"></span></p>
   <div class="picklist" id="i-list"></div>
   <div class="row"><label><input type="checkbox" id="i-move"> コピーではなく移動する（ダウンロードフォルダからは消えます）</label></div>
   <p class="msg error" id="i-msg" hidden></p>
@@ -267,6 +292,12 @@
   <div class="row"><button class="btn" id="s-balance">残高を確認</button><span id="s-balance-text" class="path"></span></div>
   <p class="msg" id="s-msg" hidden></p>
   <div class="actions"><button class="btn" data-close>閉じる</button><button class="btn primary" id="s-save">保存</button></div>
+</dialog>
+
+<dialog id="dlg-compare">
+  <div class="comparebar"><span class="t">並べて比較（どちらを回しても同じ角度になります）</span>
+    <label><input type="checkbox" id="cmp-rotate"> 自動回転</label><button class="btn" id="cmp-close">閉じる</button></div>
+  <div class="compare" id="cmp"></div>
 </dialog>
 
 <div class="dropzone" id="dropzone" hidden>ここにドロップしてフォルダに追加</div>
@@ -336,6 +367,7 @@ function render() {
     size: (a, b) => totalSize(b) - totalSize(a),
   }[sort]);
 
+  updateSelbar();
   $('count').textContent = shown.length < models.length ? `${shown.length} / ${models.length} 件` : `${models.length} 件`;
   $('empty').hidden = shown.length > 0;
   const grid = $('grid');
@@ -361,7 +393,15 @@ function render() {
       b.textContent = formats.join(' · ');
       card.querySelector('.thumb').append(b);
     }
-    card.onclick = () => open(i);
+    const check = document.createElement('span');
+    check.className = 'check';
+    card.querySelector('.thumb').append(check);
+    card.classList.toggle('selected', selected.has(m.key));
+    check.textContent = selected.has(m.key) ? '✓' : '';
+    card.onclick = (e) => {
+      if (selecting || e.ctrlKey || e.metaKey) return toggleSelect(m.key);
+      open(i);
+    };
     grid.append(card);
     setThumb(card, m);
   });
@@ -568,7 +608,7 @@ for (const id of ['c-bg', 'c-light', 'c-exposure']) {
 
 // ---- Changing the folder: add (drag & drop), rename, delete ---------------------------------
 const token = document.querySelector('meta[name=viewer-token]').content;
-const MODEL_EXT = /\.(glb|gltf|fbx|obj|stl|3mf|usdz)$/i;
+const MODEL_EXT = /\.(glb|gltf|fbx|obj|stl|3mf|usdz|zip)$/i;
 let toastTimer;
 function toast(text, error = false, ms = 4000) {
   const el = $('toast');
@@ -632,6 +672,117 @@ $('d-memo').oninput = () => {
   memoTimer = setTimeout(() => saveMeta(m, { memo }), 600);
 };
 $('dlg').addEventListener('close', () => render());
+
+// ---- Selecting several models: favorite, move, compare, delete ----------------------------
+let selecting = false;
+const selected = new Set();
+const selectedModels = () => models.filter((m) => selected.has(m.key));
+function setSelecting(on) {
+  selecting = on;
+  if (!on) selected.clear();
+  document.body.classList.toggle('selecting', on);
+  $('sel-toggle').classList.toggle('on', on);
+  render();
+}
+function toggleSelect(key) {
+  if (!selecting) setSelecting(true);
+  if (selected.has(key)) selected.delete(key); else selected.add(key);
+  render();
+}
+function updateSelbar() {
+  for (const key of [...selected]) if (!models.some((m) => m.key === key)) selected.delete(key);
+  $('selbar').hidden = !selecting;
+  $('sel-n').textContent = selected.size ? `${selected.size} 個選択中` : 'カードをクリックして選んでください';
+  for (const id of ['sel-fav', 'sel-move', 'sel-delete']) $(id).disabled = !selected.size;
+  $('sel-compare').disabled = selected.size !== 2;
+  const all = selectedModels();
+  $('sel-fav').textContent = all.length && all.every((m) => m.favorite) ? '☆ お気に入りから外す' : '★ お気に入りにする';
+}
+$('sel-toggle').onclick = () => setSelecting(!selecting);
+$('sel-clear').onclick = () => setSelecting(false);
+$('sel-all').onclick = () => { shown.forEach((m) => selected.add(m.key)); render(); };
+$('sel-fav').onclick = async () => {
+  const all = selectedModels();
+  const favorite = !all.every((m) => m.favorite);
+  for (const m of all) await saveMeta(m, { favorite });
+  render();
+  toast(favorite ? `${all.length} 個をお気に入りにしました` : `${all.length} 個をお気に入りから外しました`);
+};
+$('sel-move').onclick = async () => {
+  const folders = [...new Set(models.map((m) => m.folder).filter(Boolean))];
+  const hint = folders.length ? `\n今あるフォルダ: ${folders.join(', ')}` : '';
+  const folder = prompt(`移動先のフォルダ名（なければ作ります。空欄なら一番上へ）${hint}`, '');
+  if (folder === null) return;
+  const errors = [];
+  let moved = 0;
+  for (const m of selectedModels()) {
+    try {
+      await change('/__viewer/move', { method: 'POST', body: JSON.stringify({ files: modelFiles(m), folder }) });
+      moved++;
+    } catch (err) { errors.push(`${label(m)}: ${err.message}`); }
+  }
+  selected.clear();
+  await load();
+  if (errors.length) toast(`${moved} 個移動、${errors.length} 個失敗: ${errors.join(' / ')}`, true, 10000);
+  else toast(`${moved} 個を「${folder.trim() || '一番上'}」に移動しました`);
+};
+$('sel-delete').onclick = async () => {
+  const all = selectedModels();
+  if (!confirm(`${all.length} 個のモデルを削除しますか？（ごみ箱に移ります）`)) return;
+  const errors = [];
+  for (const m of all) {
+    try {
+      await change('/__viewer/delete', { method: 'POST', body: JSON.stringify({ files: modelFiles(m) }) });
+    } catch (err) { errors.push(`${label(m)}: ${err.message}`); }
+  }
+  selected.clear();
+  await load();
+  if (errors.length) toast(`${all.length - errors.length} 個削除、${errors.length} 個失敗: ${errors.join(' / ')}`, true, 10000);
+  else toast(`${all.length} 個削除しました`);
+};
+
+// Compare: two model-viewers side by side whose cameras follow each other.
+$('sel-compare').onclick = () => {
+  const pair = selectedModels();
+  if (pair.length !== 2) return;
+  if (!pair.every((m) => m.model)) return toast('比較できるのは GLB / glTF のモデルだけです', true);
+  const viewers = pair.map((m) => {
+    const box = document.createElement('div');
+    const mv = document.createElement('model-viewer');
+    mv.setAttribute('camera-controls', '');
+    mv.setAttribute('interaction-prompt', 'none');
+    mv.toggleAttribute('auto-rotate', $('cmp-rotate').checked);
+    applyLook(mv);
+    mv.src = url(m.model);
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.textContent = `${label(m)} · ${fmtSize(totalSize(m))}`;
+    fetch(`/__viewer/stats?model=${encodeURIComponent(m.model)}`).then((r) => r.json()).then((st) => {
+      if (!st.error) cap.textContent += ` · ${st.triangles.toLocaleString('ja-JP')} 三角形 · テクスチャ ${st.textures}`;
+    }).catch(() => {});
+    box.append(mv, cap);
+    return { box, mv };
+  });
+  // Angles are copied as they are; zoom relative to each model's own framing, so two models
+  // of different sizes both stay in view.
+  const home = new Map();
+  viewers.forEach(({ mv }) => mv.addEventListener('load', () => home.set(mv, mv.getCameraOrbit().radius), { once: true }));
+  viewers.forEach(({ mv }, i) => {
+    const other = viewers[1 - i].mv;
+    mv.addEventListener('camera-change', (e) => {
+      if (e.detail.source !== 'user-interaction' || !home.has(mv) || !home.has(other)) return;
+      const orbit = mv.getCameraOrbit();
+      const radius = (orbit.radius / home.get(mv)) * home.get(other);
+      other.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${radius}m`;
+      other.jumpCameraToGoal();
+    });
+  });
+  $('cmp').replaceChildren(...viewers.map((v) => v.box));
+  $('dlg-compare').showModal();
+};
+$('cmp-rotate').onchange = () => $('cmp').querySelectorAll('model-viewer').forEach((mv) => mv.toggleAttribute('auto-rotate', $('cmp-rotate').checked));
+$('cmp-close').onclick = () => $('dlg-compare').close();
+$('dlg-compare').addEventListener('close', () => $('cmp').replaceChildren());
 $('d-shot').onclick = async () => {
   const m = shown[current];
   const mv = $('stage').querySelector('model-viewer');
@@ -667,6 +818,18 @@ setInterval(async () => {
   } catch { /* server gone (window closing): nothing to refresh */ }
 }, 3000);
 
+// App: show on the import button how many model files in Downloads are not in the folder yet.
+async function updateImportBadge() {
+  if (!appState) return;
+  try {
+    const res = await api().list_downloads();
+    const fresh = res.files.filter((f) => !f.imported).length;
+    $('a-import').textContent = fresh ? `ダウンロードから取り込む… (${fresh})` : 'ダウンロードから取り込む…';
+    $('a-import').classList.toggle('primary', fresh > 0);
+  } catch { /* keep the plain label */ }
+}
+setInterval(() => { if (!document.hidden && !document.querySelector('dialog[open]')) updateImportBadge(); }, 10000);
+
 let dragDepth = 0;
 const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
 document.addEventListener('dragenter', (e) => { if (hasFiles(e)) { dragDepth++; $('dropzone').hidden = false; } });
@@ -680,7 +843,7 @@ document.addEventListener('drop', async (e) => {
   const files = [...e.dataTransfer.files];
   const models = files.filter((f) => MODEL_EXT.test(f.name));
   const skipped = files.length - models.length;
-  if (!models.length) return toast('追加できるのは GLB / glTF / FBX / OBJ / STL / 3MF / USDZ ファイルです', true);
+  if (!models.length) return toast('追加できるのは GLB / glTF / FBX / OBJ / STL / 3MF / USDZ と、それらが入った zip です', true);
   let added = 0;
   const errors = [];
   for (const f of models) {
@@ -696,6 +859,7 @@ document.addEventListener('drop', async (e) => {
   else toast(`${added} 個追加しました${extra}`);
 });
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && selecting && !document.querySelector('dialog[open]')) return setSelecting(false);
   if (!$('dlg').open || e.target.matches('textarea, input, select')) return;
   if (e.key === 'ArrowLeft') open(current - 1);
   if (e.key === 'ArrowRight') open(current + 1);
@@ -717,6 +881,7 @@ async function initApp() {
   const job = await api().get_job();
   if (job && job.running) pollJob();
   if (!appState.has_key) openSettings();
+  updateImportBadge();
 }
 window.addEventListener('pywebviewready', initApp);
 
@@ -743,8 +908,8 @@ $('a-import').onclick = async () => {
     box.value = f.name;
     box.checked = !f.imported;
     row.querySelector('.name').textContent = f.name;
-    row.querySelector('.sub').textContent =
-      `${f.imported ? '取り込み済み · ' : ''}${fmtDate(new Date(f.modified * 1000).toISOString())} · ${fmtSize(f.size)}`;
+    row.querySelector('.sub').textContent = `${f.imported ? '取り込み済み · ' : ''}${f.zip ? `zip（モデル ${f.models} 個）· ` : ''}` +
+      `${fmtDate(new Date(f.modified * 1000).toISOString())} · ${fmtSize(f.size)}`;
     return row;
   }));
   if (!res.files.length) showMsg('i-msg', 'ダウンロードフォルダにモデルファイル（GLB など）がありません', false);
@@ -760,6 +925,7 @@ $('i-start').onclick = async () => {
   else $('dlg-import').close();
   await load();
   if (res.added.length) toast(`${res.added.length} 個取り込みました`);
+  updateImportBadge();
 };
 $('a-export').onclick = () => { showMsg('e-msg', ''); $('dlg-export').showModal(); };
 $('a-generate').onclick = () => {

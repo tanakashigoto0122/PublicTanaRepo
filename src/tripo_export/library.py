@@ -11,6 +11,7 @@ import re
 import shutil
 import struct
 import sys
+import zipfile
 from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
@@ -69,9 +70,18 @@ def is_model_file(name: str) -> bool:
 def add_file(root: str, name: str, stream: BinaryIO, length: int) -> str:
     """Save ``length`` bytes from ``stream`` as a new model file at the top of ``root``.
 
-    The name is made unique rather than overwriting. Returns the new file's relative path.
+    The name is made unique rather than overwriting. A .zip is unpacked into a new folder
+    instead (see ``extract_zip``). Returns the new file's (or folder's) relative path.
     """
     name = check_name(os.path.basename(name.replace("\\", "/")))
+    if is_zip(name):
+        temp = os.path.join(os.path.abspath(root), f".upload-{os.getpid()}-{id(stream)}.zip")
+        try:
+            _write(temp, stream, length)
+            return extract_zip(temp, root, name)
+        finally:
+            if os.path.exists(temp):
+                os.remove(temp)
     if not is_model_file(name):
         raise ValueError(f"モデルファイルではありません: {name}（対応: {', '.join(e[1:].upper() for e in MODEL_EXTENSIONS)}）")
     path = unique_path(safe_path(root, name))
@@ -218,6 +228,34 @@ def rename_model(root: str, files: List[str], new_name: str) -> Dict[str, str]:
     return renames
 
 
+def move_model(root: str, files: List[str], folder: str) -> Dict[str, str]:
+    """Move every file of one model into ``folder`` (relative to ``root``; "" is the top).
+
+    The folder is created when missing. Refuses when a file of that name is already there, so
+    a model's formats and preview stay together. Returns ``{old: new}`` relative paths.
+    """
+    parts = [check_name(part) for part in folder.replace("\\", "/").split("/") if part.strip()]
+    target_dir = safe_path(root, "/".join(parts)) if parts else os.path.abspath(root)
+    plan = {}
+    for rel in files:
+        path = safe_path(root, rel)
+        if not os.path.exists(path):
+            raise ValueError(f"ファイルが見つかりません: {rel}")
+        target = os.path.join(target_dir, os.path.basename(path))
+        if os.path.normcase(target) != os.path.normcase(path) and os.path.exists(target):
+            raise ValueError(f"移動先に同じ名前のファイルがあります: {_rel(root, target)}")
+        plan[path] = target
+    os.makedirs(target_dir, exist_ok=True)
+    moves = {}
+    for path, target in plan.items():
+        if os.path.normcase(target) != os.path.normcase(path):
+            os.replace(path, target)
+            moves[_rel(root, path)] = _rel(root, target)
+    _update_manifest(root, moves)
+    _move_meta(root, dict(moves))
+    return moves
+
+
 def _recycle_windows(paths: List[str]) -> None:
     import ctypes
     from ctypes import wintypes
@@ -281,10 +319,57 @@ def downloads_dir() -> str:
     return os.path.join(os.path.expanduser("~"), "Downloads")
 
 
-def list_importable(source: str, root: str) -> List[Dict[str, Any]]:
-    """Model files directly in ``source``, newest first, flagging ones ``root`` already has.
+MAX_ZIP_BYTES = 2 * 1024 ** 3
 
-    "Already has" means a file with the same name and size anywhere in ``root``.
+
+def is_zip(name: str) -> bool:
+    return name.lower().endswith(".zip")
+
+
+def zip_model_count(path: str) -> int:
+    """How many model files a .zip holds (0 when it is not a readable zip)."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return sum(1 for n in archive.namelist() if is_model_file(n) and not n.startswith("__MACOSX/"))
+    except (OSError, zipfile.BadZipFile):
+        return 0
+
+
+def extract_zip(zip_path: str, root: str, name: str) -> str:
+    """Unpack a .zip holding models (with their textures) into a new folder ``root/<zip name>``.
+
+    Every member must stay inside that folder; macOS metadata is skipped. Returns the folder's
+    relative path.
+    """
+    stem = check_name(os.path.splitext(os.path.basename(name))[0] or "zip")
+    try:
+        archive = zipfile.ZipFile(zip_path)
+    except zipfile.BadZipFile:
+        raise ValueError(f"zip ファイルとして読めません: {name}")
+    with archive:
+        members = [m for m in archive.infolist()
+                   if not m.is_dir() and not m.filename.startswith("__MACOSX/")
+                   and not os.path.basename(m.filename).startswith(".")]
+        if not any(is_model_file(m.filename) for m in members):
+            raise ValueError(f"zip の中にモデルファイルがありません: {name}")
+        if sum(m.file_size for m in members) > MAX_ZIP_BYTES:
+            raise ValueError(f"zip の中身が大きすぎます: {name}")
+        folder = unique_path(safe_path(root, stem))
+        # Check every member before writing anything, so a refused zip leaves nothing behind.
+        targets = [(member, safe_path(folder, member.filename)) for member in members]
+        os.makedirs(folder)
+        for member, target in targets:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with archive.open(member) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst, _COPY_CHUNK)
+    return _rel(root, folder)
+
+
+def list_importable(source: str, root: str) -> List[Dict[str, Any]]:
+    """Model files (and .zip files holding models) directly in ``source``, newest first.
+
+    Each is flagged when ``root`` already has it: a model file with the same name and size
+    anywhere in ``root``, or for a zip, a folder named after it at the top of ``root``.
     """
     have = set()
     for dirpath, dirnames, filenames in os.walk(root):
@@ -299,11 +384,20 @@ def list_importable(source: str, root: str) -> List[Dict[str, Any]]:
         return []
     for name in names:
         path = os.path.join(source, name)
-        if not (is_model_file(name) and os.path.isfile(path)):
+        if not os.path.isfile(path):
+            continue
+        if is_zip(name):
+            models = zip_model_count(path)
+            if not models:
+                continue
+            imported = os.path.isdir(os.path.join(root, os.path.splitext(name)[0]))
+        elif is_model_file(name):
+            models, imported = 1, (name.lower(), os.path.getsize(path)) in have
+        else:
             continue
         stat = os.stat(path)
         items.append({"name": name, "size": stat.st_size, "modified": stat.st_mtime,
-                      "imported": (name.lower(), stat.st_size) in have})
+                      "imported": imported, "models": models, "zip": is_zip(name)})
     items.sort(key=lambda item: item["modified"], reverse=True)
     return items
 
@@ -311,17 +405,24 @@ def list_importable(source: str, root: str) -> List[Dict[str, Any]]:
 def import_files(source: str, names: List[str], root: str, move: bool = False) -> Tuple[List[str], Dict[str, str]]:
     """Copy (or move) the named files from ``source`` into the top of ``root``.
 
-    Returns the new relative paths and ``{name: error}`` for files that could not be imported;
-    one bad file does not stop the others.
+    A .zip is unpacked into its own folder (and deleted afterwards when moving). Returns the new
+    relative paths and ``{name: error}`` for files that could not be imported; one bad file
+    does not stop the others.
     """
     added: List[str] = []
     errors: Dict[str, str] = {}
     for name in names:
         try:
-            if os.path.basename(name) != name or not is_model_file(name):
+            if os.path.basename(name) != name or not (is_model_file(name) or is_zip(name)):
                 raise ValueError("モデルファイルではありません")
+            src = os.path.join(source, name)
+            if is_zip(name):
+                added.append(extract_zip(src, root, name))
+                if move:
+                    os.remove(src)
+                continue
             target = unique_path(safe_path(root, name))
-            (shutil.move if move else shutil.copy2)(os.path.join(source, name), target)
+            (shutil.move if move else shutil.copy2)(src, target)
             added.append(_rel(root, target))
         except (ValueError, OSError) as exc:
             errors[name] = str(exc) or type(exc).__name__
