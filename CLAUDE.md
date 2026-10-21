@@ -34,8 +34,11 @@ Key constraints of the Tripo API that shape the design:
   - `list_history` pages through `GET /v3/account/usage` to find every task ID.
   - `export_all` queries tasks with `POST /v3/tasks/list` in batches of 20
     (`QUERY_BATCH_SIZE`) and downloads each batch before querying the next, so URLs
-    don't expire.
-  - Formats other than GLB go through `convert_model`, which costs credits.
+    don't expire. If a download still fails (e.g. the URL expired during a slow batch),
+    `_download_output` re-fetches the task with `get_task` and retries once.
+  - Formats other than GLB go through `convert_model`, which costs credits. Conversion
+    tasks in the history (`is_conversion`) are left out of `export_all`, so they are never
+    downloaded or converted again. The preview is saved before converting.
   - `Manifest` (`manifest.json` in the output directory, keyed `<task_id>:<FORMAT>`)
     makes re-runs resumable. Downloads go to `*.part` first and are renamed when complete.
 - `src/tripo_export/viewer.py` + `viewer.html`: `tripo-export view`. It runs a stdlib

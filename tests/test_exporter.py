@@ -9,11 +9,12 @@ from tripo_export import exporter
 from tripo_export.cli import _read_ids, build_parser
 
 
-def make_task(task_id, status="success", model_url=None, preview=None, create_time=1760000000):
+def make_task(task_id, status="success", model_url=None, preview=None, create_time=1760000000,
+              type="text_to_model"):
     if model_url is None:
         model_url = f"https://cdn.example/{task_id}/model.glb?sig=x"
     return SimpleNamespace(
-        task_id=task_id, status=status, type="text_to_model", create_time=create_time, error_msg=None,
+        task_id=task_id, status=status, type=type, create_time=create_time, error_msg=None,
         output=SimpleNamespace(model_url=model_url, rendered_image=preview),
     )
 
@@ -22,13 +23,14 @@ class FakeClient:
     def __init__(self, tasks, usage=None, missed=()):
         self.tasks = {t.task_id: t for t in tasks}
         self.usage = usage if usage is not None else [
-            SimpleNamespace(task_id=t.task_id, status=t.status) for t in tasks
+            SimpleNamespace(task_id=t.task_id, status=t.status, type=t.type) for t in tasks
         ]
         self.missed = set(missed)
         self.downloads = []
         self.batches = []
         self.converted = []
         self.fail_urls = set()
+        self.refreshed = {}  # task_id -> task that get_task returns (fresh signed URLs)
 
     async def get_usage(self, limit=50, offset=0):
         return self.usage[offset:offset + limit]
@@ -39,6 +41,9 @@ class FakeClient:
             tasks={i: self.tasks[i] for i in ids if i in self.tasks and i not in self.missed},
             missed=[i for i in ids if i in self.missed or i not in self.tasks],
         )
+
+    async def get_task(self, task_id):
+        return self.refreshed.get(task_id, self.tasks[task_id])
 
     async def download_file(self, url, path):
         if url in self.fail_urls:
@@ -52,7 +57,8 @@ class FakeClient:
     async def convert_model(self, task_id, fmt, **kwargs):
         self.converted.append((task_id, fmt))
         conv_id = f"conv-{task_id}"
-        self.tasks[conv_id] = make_task(conv_id, model_url=f"https://cdn.example/{conv_id}/model.{fmt.lower()}")
+        self.tasks[conv_id] = make_task(conv_id, model_url=f"https://cdn.example/{conv_id}/model.{fmt.lower()}",
+                                        type="convert_model")
         return conv_id
 
     async def wait_for_task(self, task_id, **kwargs):
@@ -149,6 +155,44 @@ class ExportTests(unittest.TestCase):
         client = FakeClient([make_task("a", preview="https://cdn.example/a/r.webp")])
         self.export(client, with_preview=True)
         self.assertTrue(any(f.endswith("_a_preview.webp") for f in os.listdir(self.out)))
+
+    def test_conversions_in_history_are_not_exported_again(self):
+        client = FakeClient([make_task("a")])
+        self.export(client, fmt="fbx")
+        # The conversion task created above now shows up in the account history.
+        client.usage.append(SimpleNamespace(task_id="conv-a", status="success", type="convert_model"))
+        client.converted.clear()
+        summary = self.export(client, fmt="fbx")
+        self.assertEqual(client.converted, [])
+        self.assertEqual(summary.skipped, ["a"])
+        summary = self.export(client)
+        self.assertEqual(summary.exported, ["a"])
+        self.assertFalse(any("conv-a" in f for f in os.listdir(self.out)))
+
+    def test_expired_url_is_refreshed_and_retried(self):
+        client = FakeClient([make_task("a")])
+        client.fail_urls.add(client.tasks["a"].output.model_url)
+        client.refreshed["a"] = make_task("a", model_url="https://cdn.example/a/model.glb?sig=fresh")
+        summary = self.export(client)
+        self.assertEqual(summary.exported, ["a"])
+        self.assertEqual(client.downloads, ["https://cdn.example/a/model.glb?sig=fresh"])
+
+    def test_preview_is_saved_before_conversion(self):
+        client = FakeClient([make_task("a", preview="https://cdn.example/a/r.webp")])
+        order = []
+        convert, download = client.convert_model, client.download_file
+
+        async def logged_convert(task_id, fmt, **kwargs):
+            order.append("convert")
+            return await convert(task_id, fmt, **kwargs)
+
+        async def logged_download(url, path):
+            order.append(url.rsplit("/", 1)[-1])
+            await download(url, path)
+
+        client.convert_model, client.download_file = logged_convert, logged_download
+        self.export(client, fmt="obj", with_preview=True)
+        self.assertEqual(order, ["r.webp", "convert", "model.obj"])
 
     def test_rejects_unknown_format(self):
         with self.assertRaises(ValueError):

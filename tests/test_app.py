@@ -100,6 +100,22 @@ class AppApiTests(unittest.TestCase):
         job = wait_for(self.api)
         self.assertEqual(job["error"], "API down")
 
+    def test_empty_history_explains_studio_models(self):
+        self.api.save_settings({"api_key": "tsk_abc"})
+        self.client.usage = []
+        self.api.start_export({})
+        job = wait_for(self.api)
+        self.assertEqual(job["result"], app.NO_HISTORY_TEXT)
+
+    def test_invalid_key_error_is_explained(self):
+        self.api.save_settings({"api_key": "tsk_abc"})
+
+        async def rejected():
+            raise RuntimeError("[2] Invalid API key Suggestion: Check if your credentials is valid")
+
+        self.client.get_balance = rejected
+        self.assertIn("API キーが正しくありません", self.api.get_balance()["error"])
+
     def test_balance(self):
         self.api.save_settings({"api_key": "tsk_abc"})
         self.assertEqual(self.api.get_balance(), {"balance": 1000.0, "frozen": 0.0})

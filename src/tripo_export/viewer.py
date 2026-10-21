@@ -73,7 +73,8 @@ def build_index(root: str) -> List[Dict[str, Any]]:
             stat = os.stat(path)
             item = models.setdefault(key, {
                 "id": key,
-                "task_id": entry.get("task_id"),
+                # Without a manifest, the exporter's "<date>_<task_id>" naming still names the task.
+                "task_id": entry.get("task_id") or (parsed["key"] if parsed["created"] else None),
                 "title": parsed["key"],
                 "prompt": None,
                 "created": parsed["created"],

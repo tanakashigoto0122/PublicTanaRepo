@@ -49,6 +49,12 @@ class BuildIndexTests(unittest.TestCase):
         self.assertEqual(set(items), {"robot", "chair"})
         self.assertEqual(items["robot"]["model"], "studio/robot.glb")
         self.assertIsNone(items["chair"]["model"])
+        self.assertIsNone(items["robot"]["task_id"])
+
+    def test_task_id_from_exporter_file_name_without_manifest(self):
+        touch(self.root, "20251009-120000_abc.glb")
+        [item] = viewer.build_index(self.root)
+        self.assertEqual(item["task_id"], "abc")
 
     def test_newest_first(self):
         touch(self.root, "20240101-000000_old.glb")

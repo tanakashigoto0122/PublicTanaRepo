@@ -122,6 +122,31 @@ async def _download(client: Any, url: str, path: str) -> None:
             os.remove(part)
 
 
+async def _download_output(client: Any, task: Any, attr: str, path: str) -> Any:
+    """Download ``task.output.<attr>`` to ``path``; return the task (re-queried if that was needed).
+
+    Signed URLs expire about 5 minutes after the task was queried, and a slow batch can outlive
+    them, so on failure the task is fetched again for fresh URLs and the download retried once.
+    """
+    try:
+        await _download(client, getattr(task.output, attr), path)
+        return task
+    except Exception:
+        if not hasattr(client, "get_task"):
+            raise
+    task = await client.get_task(task.task_id)
+    url = getattr(task.output, attr, None)
+    if not url:
+        raise RuntimeError(f"{attr} is no longer available")
+    await _download(client, url, path)
+    return task
+
+
+def is_conversion(item: Any) -> bool:
+    """True for format-conversion tasks, which only repackage another task's model."""
+    return "convert" in str(getattr(item, "type", None) or "").lower()
+
+
 async def save_task_model(
     client: Any,
     task: Any,
@@ -135,10 +160,20 @@ async def save_task_model(
     For any format other than GLB a conversion task is created first, which consumes credits.
     """
     fmt = fmt.upper()
-    url = getattr(task.output, "model_url", None)
-    if not url:
+    if not getattr(task.output, "model_url", None):
         return None
-    if fmt != "GLB":
+    base = f"{_date_prefix(task)}{task.task_id}"
+
+    # The preview comes first: a conversion can take minutes, long enough for its URL to expire.
+    preview = getattr(task.output, "rendered_image", None)
+    if with_preview and preview:
+        task = await _download_output(
+            client, task, "rendered_image", os.path.join(out_dir, base + "_preview" + _extension(preview, ".webp")))
+
+    if fmt == "GLB":
+        file_name = base + _extension(task.output.model_url, ".glb")
+        await _download_output(client, task, "model_url", os.path.join(out_dir, file_name))
+    else:
         convert_id = await client.convert_model(task.task_id, fmt, **(convert_options or {}))
         converted = await client.wait_for_task(convert_id, timeout=CONVERT_TIMEOUT_SECONDS)
         if _status(converted.status) != "success":
@@ -147,14 +182,8 @@ async def save_task_model(
         url = getattr(converted.output, "model_url", None)
         if not url:
             raise RuntimeError(f"conversion to {fmt} returned no model")
-
-    base = f"{_date_prefix(task)}{task.task_id}"
-    file_name = base + _extension(url, "." + fmt.lower())
-    await _download(client, url, os.path.join(out_dir, file_name))
-
-    preview = getattr(task.output, "rendered_image", None)
-    if with_preview and preview:
-        await _download(client, preview, os.path.join(out_dir, base + "_preview" + _extension(preview, ".webp")))
+        file_name = base + _extension(url, "." + fmt.lower())
+        await _download_output(client, converted, "model_url", os.path.join(out_dir, file_name))
     return file_name
 
 
@@ -184,8 +213,13 @@ async def export_all(
     if task_ids is None:
         log("Reading task history...")
         history = await list_history(client)
-        ids = [item.task_id for item in history if _status(item.status) in ("", "success")]
-        log(f"{len(history)} tasks in history, {len(ids)} succeeded.")
+        # Conversions (including the ones earlier non-GLB exports created) are copies of another
+        # task's model; exporting them again would duplicate files, and converting them costs credits.
+        conversions = [item for item in history if is_conversion(item)]
+        ids = [item.task_id for item in history
+               if not is_conversion(item) and _status(item.status) in ("", "success")]
+        log(f"{len(history)} tasks in history, {len(ids)} succeeded"
+            + (f" ({len(conversions)} format conversions left out)." if conversions else "."))
     else:
         ids = list(dict.fromkeys(task_ids))
 

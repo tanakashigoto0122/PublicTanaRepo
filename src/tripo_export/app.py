@@ -97,8 +97,15 @@ class Job:
                 "log": self.log[-200:], "result": self.result, "error": self.error}
 
 
+NO_HISTORY_TEXT = ("API の生成履歴にモデルがありませんでした。Tripo Studio（Web 版）で作ったモデルは API からは"
+                   "見えないので、Studio でダウンロードした GLB をこのフォルダに入れると一覧に表示されます")
+
+
 def _error_text(exc: BaseException) -> str:
-    return str(exc) or type(exc).__name__
+    text = str(exc) or type(exc).__name__
+    if "Invalid API key" in text:
+        return "API キーが正しくありません。platform.tripo3d.ai で発行したキー（tsk_ で始まる）を設定してください"
+    return text
 
 
 class AppApi:
@@ -197,6 +204,8 @@ class AppApi:
 
             summary = await export_all(client, folder, fmt=fmt, with_preview=bool(options.get("preview")),
                                        log=job.log.append, progress=progress)
+            if not (summary.exported or summary.skipped or summary.no_model or summary.failed):
+                return NO_HISTORY_TEXT
             text = f"保存 {len(summary.exported)} 件 / 保存済みのためスキップ {len(summary.skipped)} 件"
             if summary.no_model:
                 text += f" / モデルなし {len(summary.no_model)} 件"
