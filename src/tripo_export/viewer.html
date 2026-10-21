@@ -223,6 +223,9 @@
           <option value="neutral">ニュートラル</option><option value="legacy">スタジオ</option><option value="flat">影なし</option>
         </select></label>
         <label>明るさ <input type="range" id="c-exposure" min="0.3" max="2.5" step="0.1" value="1"></label>
+        <label title="光が当たる方向を回します">光の向き <input type="range" id="c-lightdir" min="0" max="355" step="5" value="0"></label>
+        <label title="左でザラザラ、右でツルツル（表示だけで、ファイルは変わりません）">ツヤ <input type="range" id="c-gloss" min="-100" max="100" step="5" value="0"></label>
+        <button class="btn" id="c-reset" title="背景・ライト・明るさ・光の向き・ツヤを最初に戻します">戻す</button>
       </div>
       <div class="files" id="d-files"></div>
       <div class="controls" id="d-anim-row" hidden>
@@ -554,6 +557,7 @@ function showFavorite(m) {
 // Called when the model has loaded: its size, and its animations (e.g. a rigged Tripo model).
 function showLoaded(mv) {
   if (!mv.isConnected) return;
+  applyGloss(mv);
   const { x, y, z } = mv.getDimensions();
   const fmt = (v) => (v >= 1 ? v.toFixed(2) + ' m' : (v * 100).toFixed(1) + ' cm');
   addInfo('大きさ', `幅 ${fmt(x)} × 高さ ${fmt(y)} × 奥行 ${fmt(z)}`);
@@ -598,8 +602,46 @@ function applyLook(mv = $('stage').querySelector('model-viewer')) {
   mv.setAttribute('environment-image', env);
   mv.setAttribute('shadow-intensity', shadow);
   mv.setAttribute('exposure', $('c-exposure').value);
+  applyLightDir(mv);
+  applyGloss(mv);
 }
-for (const id of ['c-bg', 'c-light', 'c-exposure']) {
+
+// model-viewer cannot rotate its environment, so the model is turned instead and the camera
+// turned with it by the same angle: the view stays put and only the light appears to move.
+function applyLightDir(mv) {
+  const angle = Number($('c-lightdir').value);
+  const before = Number(mv.dataset.lightdir || 0);
+  mv.dataset.lightdir = angle;
+  mv.setAttribute('orientation', `0deg 0deg ${angle}deg`);
+  if (!mv.loaded) {
+    mv.setAttribute('camera-orbit', `${angle}deg 75deg 105%`);
+    return;
+  }
+  if (angle === before) return;
+  const orbit = mv.getCameraOrbit();
+  mv.cameraOrbit = `${orbit.theta + (angle - before) * Math.PI / 180}rad ${orbit.phi}rad ${orbit.radius}m`;
+  mv.jumpCameraToGoal();
+}
+
+// Gloss scales each material's roughness factor (which multiplies its roughness texture):
+// right of center towards 0 (smooth), left towards 1 (rough). The original factors are kept.
+const baseRoughness = new WeakMap();
+function applyGloss(mv) {
+  if (!mv.model) return;
+  const g = Number($('c-gloss').value) / 100;
+  for (const material of mv.model.materials) {
+    const pbr = material.pbrMetallicRoughness;
+    if (!baseRoughness.has(material)) baseRoughness.set(material, pbr.roughnessFactor);
+    const r0 = baseRoughness.get(material);
+    pbr.setRoughnessFactor(g >= 0 ? r0 * (1 - g) : r0 + (1 - r0) * -g);
+  }
+}
+const LOOK_IDS = ['c-bg', 'c-light', 'c-exposure', 'c-lightdir', 'c-gloss'];
+$('c-reset').onclick = () => {
+  for (const id of LOOK_IDS) { $(id).value = $(id).tagName === 'SELECT' ? $(id).options[0].value : $(id).defaultValue; store.set(`tripo-viewer-${id}`, $(id).value); }
+  applyLook();
+};
+for (const id of LOOK_IDS) {
   const saved = store.get(`tripo-viewer-${id}`);
   const valid = $(id).options ? [...$(id).options].some((o) => o.value === saved) : saved !== null;
   if (valid) $(id).value = saved;
@@ -753,6 +795,7 @@ $('sel-compare').onclick = () => {
     mv.setAttribute('interaction-prompt', 'none');
     mv.toggleAttribute('auto-rotate', $('cmp-rotate').checked);
     applyLook(mv);
+    mv.addEventListener('load', () => applyGloss(mv), { once: true });
     mv.src = url(m.model);
     const cap = document.createElement('div');
     cap.className = 'cap';
