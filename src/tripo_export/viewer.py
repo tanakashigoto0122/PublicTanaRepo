@@ -3,33 +3,40 @@
 ``serve`` starts an HTTP server bound to localhost that serves the folder plus a single-page
 viewer (``viewer.html``) and a JSON index built by ``build_index``. model-viewer is bundled in
 ``vendor/``, so the viewer works offline and nothing leaves the machine.
+
+The page can also add, rename and delete models (``library.py``) through POST/PUT endpoints.
+Those need the per-server token that is written into the page, and a localhost Host header, so
+other web pages (including DNS-rebinding ones) cannot change the folder.
 """
 
 import functools
 import json
 import os
-import re
+import secrets
 import threading
 import webbrowser
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import parse_qs, urlsplit
 
+from . import library
 from .exporter import MANIFEST_NAME
+from .library import DATE_PREFIX, IMAGE_EXTENSIONS, MODEL_EXTENSIONS, PREVIEW_SUFFIX, VIEWABLE
 
 INDEX_PATH = "/__viewer/models.json"
 MODEL_VIEWER_PATH = "/__viewer/model-viewer.min.js"
-# model-viewer renders glTF only; other formats are offered as downloads on the same card.
-VIEWABLE = (".glb", ".gltf")
-MODEL_EXTENSIONS = VIEWABLE + (".fbx", ".obj", ".stl", ".3mf", ".usdz")
-IMAGE_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
-PREVIEW_SUFFIX = "_preview"
-_DATE_PREFIX = re.compile(r"^(\d{8}-\d{6})_(.+)$")
+UPLOAD_PATH = "/__viewer/upload"
+RENAME_PATH = "/__viewer/rename"
+DELETE_PATH = "/__viewer/delete"
+TOKEN_HEADER = "X-Viewer-Token"
+TOKEN_PLACEHOLDER = b"__VIEWER_TOKEN__"
+MAX_UPLOAD_BYTES = 2 * 1024 ** 3
 
 
 def _parse_stem(stem: str) -> Dict[str, Optional[str]]:
     """Split ``20251009-120000_<task_id>`` (the exporter's naming) into its parts."""
-    match = _DATE_PREFIX.match(stem)
+    match = DATE_PREFIX.match(stem)
     if not match:
         return {"key": stem, "created": None}
     created = datetime.strptime(match.group(1), "%Y%m%d-%H%M%S").isoformat()
@@ -49,6 +56,8 @@ def build_index(root: str) -> List[Dict[str, Any]]:
         with open(manifest_path, encoding="utf-8") as handle:
             for entry in json.load(handle).values():
                 manifest[entry["file"]] = entry
+    # Other formats of a recorded file share its stem, even after the model was renamed.
+    stem_tasks = {os.path.splitext(name)[0]: entry["task_id"] for name, entry in manifest.items()}
 
     models: Dict[str, Dict[str, Any]] = {}
     previews: Dict[str, str] = {}
@@ -69,12 +78,12 @@ def build_index(root: str) -> List[Dict[str, Any]]:
 
             entry = manifest.get(rel, {})
             parsed = _parse_stem(os.path.basename(stem))
-            key = entry.get("task_id") or parsed["key"]
+            key = entry.get("task_id") or stem_tasks.get(stem) or parsed["key"]
             stat = os.stat(path)
             item = models.setdefault(key, {
                 "id": key,
                 # Without a manifest, the exporter's "<date>_<task_id>" naming still names the task.
-                "task_id": entry.get("task_id") or (parsed["key"] if parsed["created"] else None),
+                "task_id": entry.get("task_id") or stem_tasks.get(stem) or (parsed["key"] if parsed["created"] else None),
                 "title": parsed["key"],
                 "prompt": None,
                 "created": parsed["created"],
@@ -107,7 +116,8 @@ class _Handler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
-            self._send(_asset("viewer.html"), "text/html; charset=utf-8")
+            page = _asset("viewer.html").replace(TOKEN_PLACEHOLDER, self.server.token.encode())
+            self._send(page, "text/html; charset=utf-8")
         elif path == INDEX_PATH:
             body = json.dumps({"root": os.path.abspath(self.directory), "models": build_index(self.directory)},
                               ensure_ascii=False).encode("utf-8")
@@ -117,8 +127,49 @@ class _Handler(SimpleHTTPRequestHandler):
         else:
             super().do_GET()
 
-    def _send(self, body: bytes, content_type: str, cache: bool = False) -> None:
-        self.send_response(200)
+    def do_PUT(self) -> None:
+        def upload() -> Dict[str, Any]:
+            if urlsplit(self.path).path != UPLOAD_PATH:
+                raise LookupError(self.path)
+            name = (parse_qs(urlsplit(self.path).query).get("name") or [""])[0]
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 < length <= MAX_UPLOAD_BYTES:
+                raise ValueError("ファイルが空か、大きすぎます")
+            return {"path": library.add_file(self.directory, name, self.rfile, length)}
+
+        self._change(upload)
+
+    def do_POST(self) -> None:
+        def change() -> Dict[str, Any]:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            files = [str(f) for f in body.get("files") or []]
+            path = urlsplit(self.path).path
+            if path == RENAME_PATH:
+                return {"renamed": library.rename_model(self.directory, files, str(body.get("name") or ""))}
+            if path == DELETE_PATH:
+                return {"moved_to": library.delete_model(self.directory, files)}
+            raise LookupError(path)
+
+        self._change(change)
+
+    def _change(self, action: Callable[[], Dict[str, Any]]) -> None:
+        """Run a request that changes the folder, after checking it came from the viewer page."""
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+        if host not in ("127.0.0.1", "localhost") or not secrets.compare_digest(
+                self.headers.get(TOKEN_HEADER) or "", self.server.token):
+            self._send(b'{"error": "forbidden"}', "application/json", status=403)
+            return
+        try:
+            result, status = action(), 200
+        except LookupError:
+            result, status = {"error": "not found"}, 404
+        except (ValueError, OSError) as exc:
+            result, status = {"error": str(exc)}, 400
+        self._send(json.dumps(result, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8",
+                   status=status)
+
+    def _send(self, body: bytes, content_type: str, cache: bool = False, status: int = 200) -> None:
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
@@ -144,6 +195,7 @@ class ViewerServer(ThreadingHTTPServer):
 
     def __init__(self, root: str, port: int):
         self.root = root
+        self.token = secrets.token_urlsafe(24)
         super().__init__(("127.0.0.1", port), _Handler)
 
     @property

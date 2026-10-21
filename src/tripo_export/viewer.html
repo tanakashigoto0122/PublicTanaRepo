@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewer-token" content="__VIEWER_TOKEN__">
 <title>Tripo モデル一覧</title>
 <link rel="icon" href="data:,">
 <script type="module" src="/__viewer/model-viewer.min.js"></script>
@@ -68,6 +69,22 @@
   .files a span { color: var(--muted); }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; }
   .controls label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .controls select { padding: 3px 6px; font-size: 13px; }
+  .controls input[type=range] { width: 110px; accent-color: var(--accent); }
+  .edit { display: flex; gap: 8px; }
+  .btn.danger { color: var(--danger); }
+  .dropzone { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; pointer-events: none;
+              background: color-mix(in srgb, var(--accent) 18%, transparent); border: 3px dashed var(--accent);
+              font-size: 18px; font-weight: 650; color: var(--text); }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 21; max-width: min(640px, 100vw - 32px);
+           background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
+           padding: 10px 14px; font-size: 13px; }
+  .toast.error { color: var(--danger); }
+  .picklist { max-height: 300px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 14px; }
+  .picklist label { display: flex; gap: 8px; align-items: center; padding: 7px 10px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .picklist label:last-child { border-bottom: none; }
+  .picklist .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picklist .sub { white-space: nowrap; }
   .hint { color: var(--muted); font-size: 12px; margin-top: auto; }
   .noview { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
   #thumbnailer { position: fixed; right: 0; bottom: 0; width: 256px; height: 256px; opacity: 0; pointer-events: none; z-index: -1; }
@@ -135,6 +152,7 @@
     <div class="tools">
       <button class="btn" id="a-folder">フォルダを変更…</button>
       <button class="btn" id="a-explorer">エクスプローラーで開く</button>
+      <button class="btn" id="a-import">ダウンロードから取り込む…</button>
       <button class="btn primary" id="a-export">API から一括エクスポート</button>
       <button class="btn primary" id="a-generate">モデルを生成</button>
       <button class="btn" id="a-settings">設定</button>
@@ -159,10 +177,18 @@
       <dl id="d-info"></dl>
       <div class="controls">
         <label><input type="checkbox" id="c-rotate" checked> 自動回転</label>
-        <label><input type="checkbox" id="c-dark"> 背景を暗く</label>
+        <label>背景 <select id="c-bg">
+          <option value="">標準</option><option value="#ffffff">白</option><option value="#7a7a76">グレー</option>
+          <option value="#111111">黒</option><option value="#00b140">グリーン</option>
+        </select></label>
+        <label>ライト <select id="c-light">
+          <option value="neutral">ニュートラル</option><option value="legacy">スタジオ</option><option value="flat">影なし</option>
+        </select></label>
+        <label>明るさ <input type="range" id="c-exposure" min="0.3" max="2.5" step="0.1" value="1"></label>
       </div>
       <div class="files" id="d-files"></div>
-      <div class="hint">ドラッグで回転・ホイールで拡大・右ドラッグで移動・← → で前後のモデル・Esc で閉じる</div>
+      <div class="edit"><button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button></div>
+      <div class="hint">ドラッグで回転・ホイールで拡大・右ドラッグで移動・← → で前後のモデル・Esc で閉じる。GLB などのファイルは一覧にドラッグ＆ドロップで追加できます</div>
     </div>
   </div>
 </dialog>
@@ -203,6 +229,15 @@
   <div class="actions"><button class="btn" data-close>キャンセル</button><button class="btn primary" id="g-start">生成する</button></div>
 </dialog>
 
+<dialog class="form app-only" id="dlg-import">
+  <h3>ダウンロードから取り込む</h3>
+  <p class="note">Tripo Studio（Web 版）などで保存したモデルを、ダウンロードフォルダから表示中のフォルダにコピーします。<br><span class="path" id="i-source"></span></p>
+  <div class="picklist" id="i-list"></div>
+  <div class="row"><label><input type="checkbox" id="i-move"> コピーではなく移動する（ダウンロードフォルダからは消えます）</label></div>
+  <p class="msg error" id="i-msg" hidden></p>
+  <div class="actions"><button class="btn" data-close>キャンセル</button><button class="btn primary" id="i-start">取り込む</button></div>
+</dialog>
+
 <dialog class="form app-only" id="dlg-settings">
   <h3>設定</h3>
   <label class="field"><span>Tripo API キー（tsk_ で始まる文字列）</span><input type="password" id="s-key" autocomplete="off"></label>
@@ -212,6 +247,9 @@
   <p class="msg" id="s-msg" hidden></p>
   <div class="actions"><button class="btn" data-close>閉じる</button><button class="btn primary" id="s-save">保存</button></div>
 </dialog>
+
+<div class="dropzone" id="dropzone" hidden>ここにドロップしてフォルダに追加</div>
+<div class="toast" id="toast" hidden></div>
 
 <div class="jobbar app-only" id="job" hidden>
   <div class="top"><span class="text" id="job-text"></span><button class="btn" id="job-close" hidden>閉じる</button></div>
@@ -228,6 +266,8 @@ const url = (path) => path.split('/').map(encodeURIComponent).join('/');
 const fmtSize = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 const fmtDate = (s) => s ? new Date(s).toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 const totalSize = (m) => m.files.reduce((a, f) => a + f.size, 0);
+// Exporter files are named after the task ID, so the prompt reads better; a name the user gave wins.
+const label = (m) => (m.task_id && m.title === m.task_id ? m.prompt : null) || m.title;
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* full or blocked: thumbnails are just regenerated */ } },
@@ -258,7 +298,7 @@ function render() {
   shown.sort({
     new: (a, b) => date(b).localeCompare(date(a)),
     old: (a, b) => date(a).localeCompare(date(b)),
-    name: (a, b) => (a.prompt || a.title).localeCompare(b.prompt || b.title, 'ja'),
+    name: (a, b) => label(a).localeCompare(label(b), 'ja'),
     size: (a, b) => totalSize(b) - totalSize(a),
   }[sort]);
 
@@ -271,9 +311,9 @@ function render() {
     card.className = 'card';
     card.innerHTML = `<div class="thumb"><span class="ph">${m.model ? '読み込み中…' : 'プレビューなし'}</span></div>
       <div class="meta"><div class="title"></div><div class="sub"></div></div>`;
-    card.querySelector('.title').textContent = m.prompt || m.title;
+    card.querySelector('.title').textContent = label(m);
     card.querySelector('.sub').textContent = `${fmtDate(date(m))} · ${fmtSize(totalSize(m))}`;
-    card.title = m.prompt || m.title;
+    card.title = label(m);
     const formats = [...new Set(m.files.map((f) => f.format))];
     if (formats.length > 1 || formats[0] !== 'GLB') {
       const b = document.createElement('span');
@@ -357,11 +397,10 @@ function open(i) {
   if (m.model) {
     const mv = document.createElement('model-viewer');
     mv.setAttribute('camera-controls', '');
-    mv.setAttribute('environment-image', 'neutral');
-    mv.setAttribute('shadow-intensity', '0.8');
     mv.setAttribute('touch-action', 'pan-y');
     mv.setAttribute('interaction-prompt', 'none');
     if ($('c-rotate').checked) mv.setAttribute('auto-rotate', '');
+    applyLook(mv);
     mv.src = url(m.model);
     stage.prepend(mv);
   } else {
@@ -370,9 +409,9 @@ function open(i) {
     nv.textContent = `${m.files.map((f) => f.format).join(' / ')} はブラウザでは表示できません。GLB でエクスポートすると表示できます。`;
     stage.prepend(nv);
   }
-  stage.style.background = $('c-dark').checked ? '#111' : '';
+  stage.style.background = $('c-bg').value;
 
-  $('d-title').textContent = m.title;
+  $('d-title').textContent = label(m);
   $('d-prompt').hidden = !m.prompt;
   $('d-prompt').textContent = m.prompt || '';
   const info = [['作成日', fmtDate(m.created)], ['更新日', fmtDate(m.modified)], ['タスクID', m.task_id || '—'],
@@ -410,7 +449,98 @@ $('close').onclick = () => $('dlg').close();
 $('dlg').addEventListener('close', () => $('stage').querySelector('model-viewer')?.remove());
 $('dlg').addEventListener('click', (e) => { if (e.target === $('dlg')) $('dlg').close(); });
 $('c-rotate').onchange = (e) => $('stage').querySelector('model-viewer')?.toggleAttribute('auto-rotate', e.target.checked);
-$('c-dark').onchange = (e) => { $('stage').style.background = e.target.checked ? '#111' : ''; };
+// Background and lighting of the 3D view, remembered across sessions.
+const LIGHTS = { neutral: ['neutral', '0.8'], legacy: ['legacy', '1'], flat: ['neutral', '0'] };
+function applyLook(mv = $('stage').querySelector('model-viewer')) {
+  $('stage').style.background = $('c-bg').value;
+  if (!mv) return;
+  const [env, shadow] = LIGHTS[$('c-light').value] || LIGHTS.neutral;
+  mv.setAttribute('environment-image', env);
+  mv.setAttribute('shadow-intensity', shadow);
+  mv.setAttribute('exposure', $('c-exposure').value);
+}
+for (const id of ['c-bg', 'c-light', 'c-exposure']) {
+  const saved = store.get(`tripo-viewer-${id}`);
+  const valid = $(id).options ? [...$(id).options].some((o) => o.value === saved) : saved !== null;
+  if (valid) $(id).value = saved;
+  $(id).oninput = () => { store.set(`tripo-viewer-${id}`, $(id).value); applyLook(); };
+}
+
+// ---- Changing the folder: add (drag & drop), rename, delete ---------------------------------
+const token = document.querySelector('meta[name=viewer-token]').content;
+const MODEL_EXT = /\.(glb|gltf|fbx|obj|stl|3mf|usdz)$/i;
+let toastTimer;
+function toast(text, error = false, ms = 4000) {
+  const el = $('toast');
+  el.textContent = text;
+  el.classList.toggle('error', error);
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  if (ms) toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+}
+async function change(path, init) {
+  const res = await fetch(path, { ...init, headers: { 'X-Viewer-Token': token } });
+  const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+const modelFiles = (m) => [...m.files.map((f) => f.path), ...(m.preview ? [m.preview] : [])];
+
+$('d-rename').onclick = async () => {
+  const m = shown[current];
+  const name = prompt('新しい名前（拡張子なし）', label(m));
+  if (!name || name.trim() === label(m)) return;
+  let res;
+  try {
+    res = await change('/__viewer/rename', { method: 'POST', body: JSON.stringify({ files: modelFiles(m), name }) });
+  } catch (err) { return toast(`名前を変更できませんでした: ${err.message}`, true); }
+  await load();
+  const moved = Object.values(res.renamed);
+  const i = shown.findIndex((x) => x.files.some((f) => moved.includes(f.path)));
+  if (i >= 0) open(i); else $('dlg').close();
+  toast('名前を変更しました');
+};
+$('d-delete').onclick = async () => {
+  const m = shown[current];
+  const again = m.task_id ? '\n（API から一括エクスポートすると、もう一度ダウンロードされます）' : '';
+  if (!confirm(`「${label(m)}」のファイル ${modelFiles(m).length} 個を削除しますか？${again}`)) return;
+  let res;
+  try {
+    res = await change('/__viewer/delete', { method: 'POST', body: JSON.stringify({ files: modelFiles(m) }) });
+  } catch (err) { return toast(`削除できませんでした: ${err.message}`, true); }
+  $('dlg').close();
+  await load();
+  toast(res.moved_to === 'ごみ箱' ? 'ごみ箱に移動しました' : `フォルダ内の ${res.moved_to} に移動しました`);
+};
+
+let dragDepth = 0;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+document.addEventListener('dragenter', (e) => { if (hasFiles(e)) { dragDepth++; $('dropzone').hidden = false; } });
+document.addEventListener('dragleave', (e) => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; $('dropzone').hidden = true; } });
+document.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+document.addEventListener('drop', async (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  $('dropzone').hidden = true;
+  const files = [...e.dataTransfer.files];
+  const models = files.filter((f) => MODEL_EXT.test(f.name));
+  const skipped = files.length - models.length;
+  if (!models.length) return toast('追加できるのは GLB / glTF / FBX / OBJ / STL / 3MF / USDZ ファイルです', true);
+  let added = 0;
+  const errors = [];
+  for (const f of models) {
+    toast(`追加中… ${added + errors.length + 1} / ${models.length}: ${f.name}`, false, 0);
+    try {
+      await change(`/__viewer/upload?name=${encodeURIComponent(f.name)}`, { method: 'PUT', body: f });
+      added++;
+    } catch (err) { errors.push(`${f.name}: ${err.message}`); }
+  }
+  await load();
+  const extra = skipped ? `（モデル以外の ${skipped} 個は無視しました）` : '';
+  if (errors.length) toast(`${added} 個追加、${errors.length} 個失敗: ${errors.join(' / ')}`, true, 10000);
+  else toast(`${added} 個追加しました${extra}`);
+});
 document.addEventListener('keydown', (e) => {
   if (!$('dlg').open) return;
   if (e.key === 'ArrowLeft') open(current - 1);
@@ -448,6 +578,35 @@ function openSettings() {
 $('a-folder').onclick = async () => { if (await api().choose_folder()) await load(); };
 $('a-explorer').onclick = () => api().open_folder();
 $('a-settings').onclick = openSettings;
+$('a-import').onclick = async () => {
+  showMsg('i-msg', '');
+  const res = await api().list_downloads();
+  $('i-source').textContent = res.source;
+  $('i-list').replaceChildren(...res.files.map((f) => {
+    const row = document.createElement('label');
+    row.innerHTML = '<input type="checkbox"><span class="name"></span><span class="sub"></span>';
+    const box = row.querySelector('input');
+    box.value = f.name;
+    box.checked = !f.imported;
+    row.querySelector('.name').textContent = f.name;
+    row.querySelector('.sub').textContent =
+      `${f.imported ? '取り込み済み · ' : ''}${fmtDate(new Date(f.modified * 1000).toISOString())} · ${fmtSize(f.size)}`;
+    return row;
+  }));
+  if (!res.files.length) showMsg('i-msg', 'ダウンロードフォルダにモデルファイル（GLB など）がありません', false);
+  $('i-start').disabled = !res.files.length;
+  $('dlg-import').showModal();
+};
+$('i-start').onclick = async () => {
+  const names = [...$('i-list').querySelectorAll('input:checked')].map((b) => b.value);
+  if (!names.length) return showMsg('i-msg', '取り込むファイルを選んでください');
+  const res = await api().import_downloads(names, $('i-move').checked);
+  const failed = Object.entries(res.errors);
+  if (failed.length) showMsg('i-msg', failed.map(([n, e]) => `${n}: ${e}`).join(' / '));
+  else $('dlg-import').close();
+  await load();
+  if (res.added.length) toast(`${res.added.length} 個取り込みました`);
+};
 $('a-export').onclick = () => { showMsg('e-msg', ''); $('dlg-export').showModal(); };
 $('a-generate').onclick = () => {
   showMsg('g-msg', '');

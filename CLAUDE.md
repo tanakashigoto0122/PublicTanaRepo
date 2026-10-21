@@ -52,6 +52,16 @@ Key constraints of the Tripo API that shape the design:
   cached in localStorage. `viewer.html` and `vendor/*` ship as package data (see
   `pyproject.toml`). `ViewerServer.root` can be changed while the server runs (the app does this).
   Assets are cached in memory (`_asset`), so restart the server after editing `viewer.html`.
+  The page can change the folder: drag & drop adds files (`PUT /__viewer/upload?name=`), and the
+  detail panel renames (`POST /__viewer/rename`) and deletes (`POST /__viewer/delete`) a model.
+  These need the per-server token (`ViewerServer.token`, written into the page in place of
+  `__VIEWER_TOKEN__`) in `X-Viewer-Token` and a `127.0.0.1`/`localhost` Host header, so other web
+  pages cannot change the folder. Background, lighting and exposure of the 3D view are kept in localStorage.
+- `src/tripo_export/library.py`: the file operations behind those endpoints and the app's
+  "import from Downloads". Paths from the page go through `safe_path`. Renaming keeps the
+  exporter's `<date>_` prefix and the `_preview` suffix and updates `manifest.json`. Deleting
+  moves files to the Recycle Bin on Windows (`SHFileOperationW`) and to `<folder>/.trash` elsewhere.
+  It also owns the file-type constants and the `<date>_<task_id>` pattern that `viewer.py` uses.
 - `src/tripo_export/app.py`: the desktop app. A pywebview window (Edge WebView2 on Windows)
   shows the same viewer page with `?app=1`. The page detects `window.pywebview` and adds
   `body.app`, which reveals the toolbar, dialogs and job bar (`.app-only`). The page calls
@@ -92,7 +102,9 @@ There is no linter or formatter configured.
 
 Tests live in `tests/` and use stdlib `unittest`. `test_exporter.py` uses a `FakeClient`;
 `test_viewer.py` covers the index and starts a real server on port 0. pytest is not a
-dependency. `test_app.py` drives `AppApi` with the same fake client. The viewer page itself
+dependency. `test_app.py` drives `AppApi` with the same fake client. `test_library.py` covers the file
+operations and the token-protected endpoints; its real Recycle Bin test runs only with
+`TRIPO_TEST_RECYCLE=1` on Windows, because it leaves a file in the Recycle Bin. The viewer page itself
 has no automated test. To check it by hand, run `tripo-export view <folder of .glb files>` and
 open it in Playwright/Chromium. For the app UI, inject a mock `window.pywebview.api` with
 `addInitScript` and load `/?app=1`. The real window can only be checked on Windows (CI smoke

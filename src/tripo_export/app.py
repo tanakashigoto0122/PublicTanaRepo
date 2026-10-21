@@ -15,7 +15,7 @@ import threading
 import traceback
 from typing import Any, Callable, Dict, List, Optional
 
-from . import __version__
+from . import __version__, library
 from .exporter import FORMATS, export_all, generate
 from .viewer import ViewerServer, make_server
 
@@ -187,6 +187,15 @@ class AppApi:
         path = os.path.abspath(os.path.join(root, rel_path))
         if os.path.commonpath([root, path]) == root and os.path.exists(path):
             _reveal(path, select=True)
+
+    def list_downloads(self) -> Dict[str, Any]:
+        """Model files in the Downloads folder (e.g. saved from Tripo Studio), for importing."""
+        source = library.downloads_dir()
+        return {"source": source, "files": library.list_importable(source, self._server.root)}
+
+    def import_downloads(self, names: List[str], move: bool = False) -> Dict[str, Any]:
+        added, errors = library.import_files(library.downloads_dir(), list(names), self._server.root, move=bool(move))
+        return {"added": added, "errors": errors}
 
     # -- background jobs ----------------------------------------------------
 

@@ -3,6 +3,7 @@ import tempfile
 import time
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 from test_exporter import FakeClient, make_task
 from tripo_export import app
@@ -119,6 +120,18 @@ class AppApiTests(unittest.TestCase):
     def test_balance(self):
         self.api.save_settings({"api_key": "tsk_abc"})
         self.assertEqual(self.api.get_balance(), {"balance": 1000.0, "frozen": 0.0})
+
+    def test_import_from_downloads(self):
+        downloads = os.path.join(self._tmp.name, "Downloads")
+        os.makedirs(downloads)
+        with open(os.path.join(downloads, "cat.glb"), "wb") as handle:
+            handle.write(b"glb")
+        with mock.patch.object(app.library, "downloads_dir", return_value=downloads):
+            listed = self.api.list_downloads()
+            self.assertEqual([f["name"] for f in listed["files"]], ["cat.glb"])
+            self.assertEqual(self.api.import_downloads(["cat.glb"]), {"added": ["cat.glb"], "errors": {}})
+            self.assertTrue(self.api.list_downloads()["files"][0]["imported"])
+        self.assertTrue(os.path.exists(os.path.join(downloads, "cat.glb")))
 
     def test_set_folder_and_reveal_stays_inside(self):
         other = os.path.join(self._tmp.name, "other")
