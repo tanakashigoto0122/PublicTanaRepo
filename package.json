@@ -1,0 +1,13 @@
+{
+  "name": "mini-games",
+  "private": true,
+  "type": "module",
+  "description": "ブラウザで遊べるミニゲーム集",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "serve": "python3 -m http.server 8000"
+  }
+}

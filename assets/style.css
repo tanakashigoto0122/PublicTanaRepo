@@ -1,0 +1,56 @@
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --text: #1f2328;
+  --muted: #656d76;
+  --accent: #2563eb;
+  --border: #d8dee4;
+  --tile: #e8eefc;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --surface: #1f2328;
+    --text: #e6edf3;
+    --muted: #9198a1;
+    --accent: #6ea8fe;
+    --border: #3d444d;
+    --tile: #26324a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 24px 16px 48px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  line-height: 1.6;
+}
+main { max-width: 720px; margin: 0 auto; }
+h1 { margin: 0 0 4px; font-size: 1.6rem; }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+.game-list { list-style: none; padding: 0; display: grid; gap: 12px; }
+.game-card {
+  display: block;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+.game-card:hover { border-color: var(--accent); }
+.game-card h2 { margin: 0 0 4px; font-size: 1.1rem; }
+.game-card p { margin: 0; color: var(--muted); }
+button {
+  font: inherit;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
