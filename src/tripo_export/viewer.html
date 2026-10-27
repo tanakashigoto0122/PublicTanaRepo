@@ -75,6 +75,9 @@
   .dim { font-size: 12px; font-weight: 650; color: #fff; background: rgba(20, 40, 120, .85); border-radius: 6px;
          padding: 2px 7px; white-space: nowrap; pointer-events: none; border: none; transform: translateY(-50%); }
   .dimlines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  .dimlines.bones line { stroke: #ff7a00; stroke-dasharray: none; stroke-width: 2.5; stroke-linecap: round; }
+  .dimlines.bones circle { fill: #fff; stroke: #ff7a00; stroke-width: 2; }
+  .bone-dot { width: 1px; height: 1px; border: none; padding: 0; background: none; pointer-events: none; visibility: hidden; }
   .dimlines line { stroke: rgba(20, 40, 120, .85); stroke-width: 2; stroke-dasharray: 5 4; }
   #d-memo { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--border);
             border-radius: 8px; padding: 8px 10px; min-height: 60px; resize: vertical; width: 100%; }
@@ -254,6 +257,7 @@
         <label title="左でザラザラ、右でツルツル（表示だけで、ファイルは変わりません）">ツヤ <input type="range" id="c-gloss" min="-100" max="100" step="5" value="0"></label>
         <label title="左で金属っぽさを消す（完全なツヤ消し向け）、右で金属っぽく">金属感 <input type="range" id="c-metal" min="-100" max="100" step="5" value="0"></label>
         <label><input type="checkbox" id="c-dims"> 寸法線</label>
+        <label id="c-bones-row" hidden><input type="checkbox" id="c-bones"> 骨を表示</label>
         <button class="btn" id="c-reset" title="背景・ライト・明るさ・光の向き・ツヤを最初に戻します">戻す</button>
       </div>
       <div class="files" id="d-files"></div>
@@ -268,6 +272,7 @@
         <button class="btn" id="d-stl" title="3D プリント用。mm 単位・Z が上・床に接地。クレジットは使いません">STL に変換</button>
         <button class="btn" id="d-phone" title="同じ Wi-Fi のスマホで、このモデルを見たり AR で置いたりできます">スマホで見る</button>
         <button class="btn" id="d-lite" title="ポリゴンやテクスチャを減らした軽い GLB（_lite.glb）を別に作ります。元のファイルはそのまま">軽量化…</button>
+        <button class="btn" id="d-mixamo" title="Mixamo（無料の自動リグ付け）にそのまま上げられる zip（OBJ + テクスチャ）を作ります">Mixamo 用 zip</button>
         <button class="btn" id="d-obj" title="OBJ + MTL とベースカラーのテクスチャを、新しいフォルダに書き出します。クレジットは使いません">OBJ に変換</button>
         <button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button>
       </div>
@@ -316,6 +321,12 @@
   <h3>軽量化</h3>
   <p class="note">軽くしたコピー（<code>名前_lite.glb</code>）を別に作ります。元のファイルはそのままです。</p>
   <p class="note" id="lite-now"></p>
+  <label class="field"><span>目的</span><select id="lite-preset">
+    <option value="">自分で選ぶ</option>
+    <option value="10000,1024">スマホゲーム向け（1 万三角形・1024px）</option>
+    <option value="50000,2048">PC ゲーム向け（5 万三角形・2048px）</option>
+    <option value="150000,4096">高品質（15 万三角形・4096px）</option>
+  </select></label>
   <div class="cols" style="grid-template-columns:1fr 1fr">
     <label class="field"><span>ポリゴン数</span><select id="lite-ratio">
       <option value="1">そのまま</option><option value="0.5">半分（50%）</option><option value="0.25">4 分の 1（25%）</option>
@@ -323,7 +334,7 @@
     </select></label>
     <label class="field"><span>テクスチャの最大サイズ</span><select id="lite-tex">
       <option value="0">そのまま</option><option value="2048">2048px</option><option value="1024">1024px</option>
-      <option value="512">512px</option><option value="256">256px</option>
+      <option value="4096">4096px</option><option value="512">512px</option><option value="256">256px</option>
     </select></label>
   </div>
   <p class="note">ポリゴンは形が崩れすぎないところで止まるので、指定より少し多めに残ることがあります。</p>
@@ -609,6 +620,10 @@ function open(i) {
   $('d-anim-row').hidden = true;
   $('d-thumb').hidden = $('d-shot').hidden = $('d-video').hidden = $('d-stl').hidden = $('d-obj').hidden = !m.model;
   $('d-lite').hidden = $('d-phone').hidden = !m.model?.toLowerCase().endsWith('.glb');
+  $('d-mixamo').hidden = !m.model;
+  $('c-bones-row').hidden = true;
+  currentRig = null;
+  if (m.model) showRig(m);
   showFavorite(m);
   $('d-memo').value = m.memo || '';
   renderTags(m);
@@ -675,6 +690,64 @@ $('d-texexport').onclick = async () => {
   if (appState) api().reveal(res.folder);
 };
 
+// Rig: joint count and whether it looks humanoid (convert.rig_info); "骨を表示" draws the
+// rest-pose skeleton as hotspots at the joints joined by SVG lines, like the dimension lines.
+let currentRig = null;
+async function showRig(m) {
+  try {
+    const rig = await fetch(`/__viewer/rig?model=${encodeURIComponent(m.model)}`).then((r) => r.json());
+    if (rig.error || shown[current] !== m || !$('dlg').open) return;
+    if (!rig.joints.length) return addInfo('リグ', 'なし（骨が入っていません）');
+    currentRig = rig;
+    const kind = rig.humanoid ? `人型${rig.style ? `（${rig.style} 形式）` : ''}` : `人型ではない（足りない部位: ${rig.missing.join('・')}）`;
+    addInfo('リグ', `あり · 関節 ${rig.joints.length} · ${kind}`);
+    $('c-bones-row').hidden = false;
+    drawBones();
+  } catch { /* rig info is a nice-to-have */ }
+}
+function drawBones(mv = $('stage').querySelector('model-viewer')) {
+  const stage = $('stage');
+  stage.querySelector('.bones')?.remove();
+  mv?.querySelectorAll('.bone-dot').forEach((el) => el.remove());
+  if (!mv || !currentRig || !$('c-bones').checked) return;
+  const joints = currentRig.joints;
+  joints.forEach((j, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'bone-dot';
+    dot.slot = `hotspot-bone-${i}`;
+    dot.dataset.position = j.position.map((v) => `${v}m`).join(' ');
+    mv.append(dot);
+  });
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.classList.add('dimlines', 'bones');
+  const lines = joints.map((j) => (j.parent === null ? null
+    : svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'line'))));
+  const dots = joints.map(() => {
+    const c = svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'circle'));
+    c.setAttribute('r', 3);
+    return c;
+  });
+  stage.append(svg);
+  const update = () => {
+    if (!svg.isConnected) return mv.removeEventListener('camera-change', update);
+    const box = stage.getBoundingClientRect(), own = mv.getBoundingClientRect();
+    const dx = own.left - box.left, dy = own.top - box.top;
+    const at = joints.map((_, i) => mv.queryHotspot(`hotspot-bone-${i}`)?.canvasPosition);
+    joints.forEach((j, i) => {
+      if (!at[i]) return;
+      dots[i].setAttribute('cx', at[i].x + dx);
+      dots[i].setAttribute('cy', at[i].y + dy);
+      const line = lines[i], from = j.parent === null ? null : at[j.parent];
+      if (!line || !from) return;
+      line.setAttribute('x1', from.x + dx); line.setAttribute('y1', from.y + dy);
+      line.setAttribute('x2', at[i].x + dx); line.setAttribute('y2', at[i].y + dy);
+    });
+  };
+  mv.addEventListener('camera-change', update);
+  requestAnimationFrame(() => requestAnimationFrame(update));
+}
+$('c-bones').onchange = () => drawBones();
+
 function showFavorite(m) {
   $('d-fav').classList.toggle('on', !!m.favorite);
   $('d-fav').textContent = m.favorite ? '★ お気に入り' : '☆ お気に入りに追加';
@@ -685,6 +758,7 @@ function showLoaded(mv) {
   if (!mv.isConnected) return;
   applyGloss(mv);
   drawDims(mv);
+  drawBones(mv);
   const { x, y, z } = mv.getDimensions();
   const fmt = (v) => (v >= 1 ? v.toFixed(2) + ' m' : (v * 100).toFixed(1) + ' cm');
   addInfo('大きさ', `幅 ${fmt(x)} × 高さ ${fmt(y)} × 奥行 ${fmt(z)}`);
@@ -1242,7 +1316,26 @@ $('d-lite').onclick = async () => {
     fetch(`/__viewer/textures?model=${encodeURIComponent(m.model)}`).then((r) => r.json()),
   ]);
   const largest = Math.max(0, ...(tex.textures || []).map((t) => Math.max(t.width || 0, t.height || 0)));
+  liteTriangles = stats.triangles || 0;
+  $('lite-preset').value = '';
+  $('lite-ratio').querySelector('option[data-preset]')?.remove();
   $('lite-now').textContent = `今: ${stats.triangles?.toLocaleString('ja-JP') ?? '?'} 三角形 · テクスチャ最大 ${largest ? largest + 'px' : 'なし'} · ${fmtSize(m.files.find((f) => f.path === m.model)?.size || 0)}`;
+};
+// Presets pick the ratio from the model's triangle count (the server keeps at least that many
+// as gltfpack stops before the shape breaks) and the texture limit.
+let liteTriangles = 0;
+$('lite-preset').onchange = () => {
+  const [target, tex] = $('lite-preset').value.split(',').map(Number);
+  $('lite-ratio').querySelector('option[data-preset]')?.remove();
+  if (!target) return;
+  if (liteTriangles && target < liteTriangles) {
+    const ratio = Math.max(0.01, target / liteTriangles);
+    const option = new Option(`約 ${target.toLocaleString('ja-JP')} 三角形（${(ratio * 100).toFixed(1)}%）`, ratio.toFixed(4));
+    option.dataset.preset = '1';
+    $('lite-ratio').append(option);
+    $('lite-ratio').value = option.value;
+  } else $('lite-ratio').value = '1';
+  $('lite-tex').value = String(tex);
 };
 $('lite-start').onclick = async () => {
   const m = shown[current];
@@ -1288,12 +1381,12 @@ $('dlg-phone').addEventListener('close', () => {
 });
 
 // Free conversion on this PC (convert.py): STL for printing, OBJ with its textures.
-for (const fmt of ['stl', 'obj']) {
+for (const fmt of ['stl', 'obj', 'mixamo']) {
   $(`d-${fmt}`).onclick = async () => {
     const m = shown[current];
     const button = $(`d-${fmt}`);
     button.disabled = true;
-    toast(`${fmt.toUpperCase()} に変換中…（大きいモデルは数十秒かかります）`, false, 0);
+    toast(`${fmt === 'mixamo' ? 'Mixamo 用 zip' : fmt.toUpperCase()} を作成中…（大きいモデルは数十秒かかります）`, false, 0);
     let res;
     try {
       res = await change('/__viewer/convert', { method: 'POST', body: JSON.stringify({ model: m.model, format: fmt }) });

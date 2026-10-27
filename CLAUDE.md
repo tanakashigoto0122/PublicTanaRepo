@@ -100,7 +100,12 @@ Key constraints of the Tripo API that shape the design:
   into `<stem>_lite.glb`; texture shrinking can then rewrite that lite file in place
   (`replace_images(..., in_place=True)`, refused for anything not named `_lite`). gltfpack.exe is
   not committed: CI and `build.ps1` download meshoptimizer v1.3 (SHA-256 pinned) into `vendor/`, and
-  `--self-test` fails without it. Locally, put it in `vendor/` or set `TRIPO_GLTFPACK`.
+  `--self-test` fails without it. Locally, put it in `vendor/` or set `TRIPO_GLTFPACK`. The dialog's
+  game presets turn a triangle target into the ratio from the model's current count.
+  `GET /__viewer/rig?model=` (`convert.rig_info`) returns the first skin's joints with rest-pose
+  positions and parents and a humanoid check against Mixamo/VRM/Rigify-style names; "骨を表示" draws
+  them like the dimension lines. `convert` format `mixamo` zips the OBJ export for Mixamo.
+  `tests/rigged_sample.py` builds a small skinned humanoid for tests and manual checks.
   "View on phone" (`POST /__viewer/share`, `/__viewer/share/stop`): `viewer.start_share` runs a
   second server on 0.0.0.0 that serves only one .glb, a small AR page and model-viewer under a
   random path, for 30 minutes or until the dialog closes; the page shows a QR from `qr.py` (own

@@ -5,6 +5,7 @@ import struct
 import tempfile
 import unittest
 
+from rigged_sample import JOINTS, rigged_glb
 from test_library import make_glb, make_png, touch
 from tripo_export import convert, library
 
@@ -175,6 +176,38 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(library.replace_images(self.root, lite, {0: (small, "image/png")}, in_place=True), lite)
         self.assertEqual(library.list_textures(self.root, lite)[0]["width"], 16)
         self.assertEqual(sorted(os.listdir(self.root)), ["tile.glb", "tile_lite.glb"])
+
+    def test_rig_info_reads_joints_and_recognises_a_humanoid(self):
+        touch(self.root, "hero.glb", rigged_glb())
+        rig = convert.rig_info(self.root, "hero.glb")
+        self.assertEqual((rig["skins"], len(rig["joints"]), rig["humanoid"], rig["style"]), (1, 7, True, "Mixamo"))
+        head = next(j for j in rig["joints"] if j["name"].endswith("Head"))
+        self.assertEqual(head["position"], [0, 1.6, 0])  # hips 1.0 + spine 0.2 + head 0.4
+        self.assertEqual(rig["joints"][head["parent"]]["name"], "mixamorig:Spine")
+        self.assertIsNone(rig["joints"][0]["parent"])
+
+    def test_rig_info_names_from_other_tools(self):
+        vrm = ["J_Bip_C_Hips", "J_Bip_C_Spine", "J_Bip_C_Head", "J_Bip_L_UpperArm", "J_Bip_R_UpperArm",
+               "J_Bip_L_UpperLeg", "J_Bip_R_UpperLeg"]
+        touch(self.root, "vrm.glb", rigged_glb(vrm))
+        self.assertEqual(convert.rig_info(self.root, "vrm.glb")["style"], "VRM / Unity")
+        self.assertTrue(convert.rig_info(self.root, "vrm.glb")["humanoid"])
+        tail = ["root", "bone1", "bone2", "bone3", "bone4", "bone5", "bone6"]
+        touch(self.root, "snake.glb", rigged_glb(tail))
+        rig = convert.rig_info(self.root, "snake.glb")
+        self.assertFalse(rig["humanoid"])
+        self.assertIn("head", rig["missing"])
+        touch(self.root, "flat.glb", mesh_glb([{"mesh": 0}]))
+        self.assertEqual(convert.rig_info(self.root, "flat.glb")["skins"], 0)
+
+    def test_mixamo_zip_holds_obj_mtl_and_textures(self):
+        import zipfile
+        touch(self.root, "tile.glb", mesh_glb([{"mesh": 0}], image=make_png(8, 8)))
+        rel = convert.convert(self.root, "tile.glb", "mixamo")
+        self.assertEqual(rel, "tile_mixamo.zip")
+        with zipfile.ZipFile(os.path.join(self.root, rel)) as archive:
+            self.assertEqual(sorted(archive.namelist()), ["tile.mtl", "tile.obj", "tile_tex0.png"])
+        self.assertEqual(sorted(os.listdir(self.root)), ["tile.glb", "tile_mixamo.zip"])
 
     def test_compressed_and_unsupported_inputs_are_refused(self):
         touch(self.root, "draco.glb", mesh_glb([{"mesh": 0}], extra={"extensionsRequired": ["KHR_draco_mesh_compression"]}))

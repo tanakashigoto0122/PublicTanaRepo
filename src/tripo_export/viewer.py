@@ -39,6 +39,7 @@ META_PATH = "/__viewer/meta"
 STATS_PATH = "/__viewer/stats"
 DUPLICATES_PATH = "/__viewer/duplicates"
 TEXTURES_PATH = "/__viewer/textures"
+RIG_PATH = "/__viewer/rig"
 TEXTURE_PATH = "/__viewer/texture"
 EXPORT_TEXTURES_PATH = "/__viewer/textures/export"
 RENAME_PATH = "/__viewer/rename"
@@ -158,7 +159,7 @@ class _Handler(SimpleHTTPRequestHandler):
         elif path == DUPLICATES_PATH:
             body = json.dumps({"groups": library.find_duplicates(self.directory)}, ensure_ascii=False).encode("utf-8")
             self._send(body, "application/json; charset=utf-8")
-        elif path in (STATS_PATH, TEXTURES_PATH, TEXTURE_PATH):
+        elif path in (STATS_PATH, TEXTURES_PATH, TEXTURE_PATH, RIG_PATH):
             query = parse_qs(urlsplit(self.path).query)
             model = (query.get("model") or [""])[0]
             try:
@@ -166,7 +167,9 @@ class _Handler(SimpleHTTPRequestHandler):
                     data, mime = library.read_texture(self.directory, model, int((query.get("index") or ["-1"])[0]))
                     self._send(data, mime or "application/octet-stream")
                     return
-                if path == TEXTURES_PATH:
+                if path == RIG_PATH:
+                    result, status = convert.rig_info(self.directory, model), 200
+                elif path == TEXTURES_PATH:
                     result, status = {"textures": library.list_textures(self.directory, model)}, 200
                 else:
                     result, status = library.glb_stats(self.directory, model), 200

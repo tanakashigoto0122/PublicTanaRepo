@@ -268,6 +268,8 @@ def convert(root: str, model: str, fmt: str) -> str:
         return to_stl(root, model)
     if fmt == "obj":
         return to_obj(root, model)
+    if fmt == "mixamo":
+        return to_mixamo_zip(root, model)
     raise ValueError(f"対応していない形式です: {fmt}")
 
 
@@ -317,4 +319,88 @@ def simplify(root: str, model: str, ratio: float) -> str:
     finally:
         if os.path.exists(part):
             os.remove(part)
+    return library._rel(root, target)
+
+
+# ---- Rigs (skeletons) -----------------------------------------------------------------------
+
+# Body parts a humanoid rig needs; each matches joint names of Mixamo, Unity/VRM, Blender and
+# similar conventions once prefixes like "mixamorig:" or "J_Bip_C_" are stripped.
+_HUMANOID_PARTS = {
+    "hips": ("hips", "pelvis", "hip"),
+    "spine": ("spine", "chest"),
+    "head": ("head",),
+    "left arm": ("leftarm", "leftupperarm", "upperarml", "luparm", "lupperarm", "arml", "larm", "leftshoulder"),
+    "right arm": ("rightarm", "rightupperarm", "upperarmr", "ruparm", "rupperarm", "armr", "rarm", "rightshoulder"),
+    "left leg": ("leftupleg", "leftupperleg", "leftthigh", "thighl", "lthigh", "upperlegl", "leftleg", "legl", "lleg"),
+    "right leg": ("rightupleg", "rightupperleg", "rightthigh", "thighr", "rthigh", "upperlegr", "rightleg", "legr", "rleg"),
+}
+
+
+def _plain(name: str) -> str:
+    name = name.lower().rsplit(":", 1)[-1]
+    for prefix in ("j_bip_c_", "j_bip_l_", "j_bip_r_", "bip01_", "bip001_", "def-", "orgbip_"):
+        if name.startswith(prefix):
+            side = {"j_bip_l_": "left", "j_bip_r_": "right"}.get(prefix, "")
+            name = side + name[len(prefix):]
+    return "".join(ch for ch in name.replace(".", "").replace("_", "").replace(" ", "").replace("-", ""))
+
+
+def _world_matrices(gltf: Dict[str, Any]) -> Tuple[Dict[int, Matrix], Dict[int, int]]:
+    """Rest-pose world matrix and parent of every node reachable from the scene roots."""
+    nodes = gltf.get("nodes") or []
+    parents = {c: i for i, n in enumerate(nodes) for c in n.get("children") or []}
+    world: Dict[int, Matrix] = {}
+    stack = [(i, _IDENTITY) for i in range(len(nodes)) if i not in parents]
+    while stack:
+        index, parent = stack.pop()
+        world[index] = _multiply(parent, _local_matrix(nodes[index]))
+        stack.extend((c, world[index]) for c in nodes[index].get("children") or [])
+    return world, parents
+
+
+def rig_info(root: str, model: str) -> Dict[str, Any]:
+    """The first skin's joints (name, rest position, parent joint) and whether it looks humanoid."""
+    path = library.safe_path(root, model)
+    if os.path.splitext(path)[1].lower() not in library.VIEWABLE:
+        raise ValueError("GLB / glTF だけ対応しています")
+    gltf = library._gltf_json(path)
+    skins = gltf.get("skins") or []
+    if not skins:
+        return {"skins": 0, "joints": [], "humanoid": False, "missing": [], "style": None}
+    nodes = gltf.get("nodes") or []
+    world, parents = _world_matrices(gltf)
+    joint_nodes = skins[0].get("joints") or []
+    position = {n: _apply(world.get(n, _IDENTITY), (0, 0, 0)) for n in joint_nodes}
+    joints = []
+    for node in joint_nodes:
+        parent = parents.get(node)
+        while parent is not None and parent not in position:  # skip non-joint nodes in between
+            parent = parents.get(parent)
+        joints.append({"name": nodes[node].get("name") or f"joint{node}",
+                       "position": [round(v, 5) for v in position[node]],
+                       "parent": joint_nodes.index(parent) if parent is not None else None})
+    names = [_plain(j["name"]) for j in joints]
+    missing = [part for part, keys in _HUMANOID_PARTS.items()
+               if not any(any(name == k or name.endswith(k) for k in keys) for name in names)]
+    raw = " ".join(j["name"] for j in joints).lower()
+    style = ("Mixamo" if "mixamorig" in raw else "VRM / Unity" if "j_bip" in raw
+             else "Blender (Rigify)" if "def-" in raw else None)
+    return {"skins": len(skins), "joints": joints, "humanoid": not missing, "missing": missing, "style": style}
+
+
+def to_mixamo_zip(root: str, model: str) -> str:
+    """A zip with the model as OBJ + MTL + textures, the upload format Mixamo accepts."""
+    import shutil
+    import zipfile
+
+    folder_rel = to_obj(root, model)
+    folder = library.safe_path(root, folder_rel)
+    target = library.unique_path(library.safe_path(root, os.path.splitext(model)[0] + "_mixamo.zip"))
+    try:
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name in sorted(os.listdir(folder)):
+                archive.write(os.path.join(folder, name), name)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
     return library._rel(root, target)
