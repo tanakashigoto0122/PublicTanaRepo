@@ -89,6 +89,11 @@ Key constraints of the Tripo API that shape the design:
   exporter's `<date>_` prefix and the `_preview` suffix and updates `manifest.json`. Deleting
   moves files to the Recycle Bin on Windows (`SHFileOperationW`) and to `<folder>/.trash` elsewhere.
   It also owns the file-type constants and the `<date>_<task_id>` pattern that `viewer.py` uses.
+- `src/tripo_export/convert.py`: free GLB/glTF → STL/OBJ conversion with the standard library only
+  (`POST /__viewer/convert`). `Gltf.accessor` reads any accessor (strides, normalized ints),
+  `read_parts` walks the default scene applying node transforms. STL is binary, mm, Z-up, centred
+  on X/Y and resting on Z = 0; OBJ goes to `<stem>_obj/` with an MTL and base color textures.
+  Draco/meshopt-compressed files are refused. About 2.5 s for 500k triangles.
 - `src/tripo_export/app.py`: the desktop app. A pywebview window (Edge WebView2 on Windows)
   shows the same viewer page with `?app=1`. The page detects `window.pywebview` and adds
   `body.app`, which reveals the toolbar, dialogs and job bar (`.app-only`). The page calls

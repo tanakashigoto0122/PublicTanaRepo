@@ -265,6 +265,8 @@
         <button class="btn" id="d-thumb" title="今の表示をこのモデルのサムネイル画像として保存します">この角度をサムネイルに</button>
         <button class="btn" id="d-shot" title="今の表示を PNG で screenshots フォルダに保存します">画像として保存</button>
         <button class="btn" id="d-video" title="モデルが一周する動画（WebM）を screenshots フォルダに保存します">一周動画を保存</button>
+        <button class="btn" id="d-stl" title="3D プリント用。mm 単位・Z が上・床に接地。クレジットは使いません">STL に変換</button>
+        <button class="btn" id="d-obj" title="OBJ + MTL とベースカラーのテクスチャを、新しいフォルダに書き出します。クレジットは使いません">OBJ に変換</button>
         <button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button>
       </div>
       <div class="hint">ドラッグで回転・ホイールで拡大・右ドラッグで移動・← → で前後のモデル・Esc で閉じる。GLB などのファイルは一覧にドラッグ＆ドロップで追加できます</div>
@@ -575,7 +577,7 @@ function open(i) {
   }));
   $('prev').hidden = $('next').hidden = shown.length < 2;
   $('d-anim-row').hidden = true;
-  $('d-thumb').hidden = $('d-shot').hidden = !m.model;
+  $('d-thumb').hidden = $('d-shot').hidden = $('d-video').hidden = $('d-stl').hidden = $('d-obj').hidden = !m.model;
   showFavorite(m);
   $('d-memo').value = m.memo || '';
   renderTags(m);
@@ -1167,6 +1169,24 @@ $('d-video').onclick = async () => {
   toast(`保存しました: ${res.path}`);
   if (appState) api().reveal(res.path);
 };
+// Free conversion on this PC (convert.py): STL for printing, OBJ with its textures.
+for (const fmt of ['stl', 'obj']) {
+  $(`d-${fmt}`).onclick = async () => {
+    const m = shown[current];
+    const button = $(`d-${fmt}`);
+    button.disabled = true;
+    toast(`${fmt.toUpperCase()} に変換中…（大きいモデルは数十秒かかります）`, false, 0);
+    let res;
+    try {
+      res = await change('/__viewer/convert', { method: 'POST', body: JSON.stringify({ model: m.model, format: fmt }) });
+    } catch (err) {
+      return toast(`変換できませんでした: ${err.message}`, true, 10000);
+    } finally { button.disabled = false; }
+    toast(`変換しました: ${res.path}`);
+    if (appState) api().reveal(res.path);
+    load();
+  };
+}
 $('d-shot').onclick = async () => {
   const m = shown[current];
   const mv = $('stage').querySelector('model-viewer');

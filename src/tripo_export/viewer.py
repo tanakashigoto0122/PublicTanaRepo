@@ -20,7 +20,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlsplit
 
-from . import library
+from . import convert, library
 from .exporter import MANIFEST_NAME
 from .library import DATE_PREFIX, IMAGE_EXTENSIONS, MODEL_EXTENSIONS, PREVIEW_SUFFIX, VIEWABLE
 
@@ -41,6 +41,7 @@ EXPORT_TEXTURES_PATH = "/__viewer/textures/export"
 RENAME_PATH = "/__viewer/rename"
 DELETE_PATH = "/__viewer/delete"
 MOVE_PATH = "/__viewer/move"
+CONVERT_PATH = "/__viewer/convert"
 TOKEN_HEADER = "X-Viewer-Token"
 TOKEN_PLACEHOLDER = b"__VIEWER_TOKEN__"
 MAX_UPLOAD_BYTES = 2 * 1024 ** 3
@@ -206,6 +207,8 @@ class _Handler(SimpleHTTPRequestHandler):
                 return {"moved_to": library.delete_model(self.directory, files)}
             if path == EXPORT_TEXTURES_PATH:
                 return {"folder": library.export_textures(self.directory, str(body.get("model") or ""))}
+            if path == CONVERT_PATH:
+                return {"path": convert.convert(self.directory, str(body.get("model") or ""), str(body.get("format") or ""))}
             if path == MOVE_PATH:
                 return {"moved": library.move_model(self.directory, files, str(body.get("folder") or ""))}
             if path == META_PATH:
