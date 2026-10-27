@@ -21,7 +21,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlsplit
 
-from . import convert, library
+from html import escape as html_escape
+
+from . import convert, library, qr
 from .exporter import MANIFEST_NAME
 from .library import DATE_PREFIX, IMAGE_EXTENSIONS, MODEL_EXTENSIONS, PREVIEW_SUFFIX, VIEWABLE
 
@@ -44,6 +46,8 @@ DELETE_PATH = "/__viewer/delete"
 MOVE_PATH = "/__viewer/move"
 CONVERT_PATH = "/__viewer/convert"
 LITE_PATH = "/__viewer/lite"
+SHARE_PATH = "/__viewer/share"
+SHARE_STOP_PATH = "/__viewer/share/stop"
 TOKEN_HEADER = "X-Viewer-Token"
 TOKEN_PLACEHOLDER = b"__VIEWER_TOKEN__"
 MAX_UPLOAD_BYTES = 2 * 1024 ** 3
@@ -209,6 +213,11 @@ class _Handler(SimpleHTTPRequestHandler):
                 return {"moved_to": library.delete_model(self.directory, files)}
             if path == EXPORT_TEXTURES_PATH:
                 return {"folder": library.export_textures(self.directory, str(body.get("model") or ""))}
+            if path == SHARE_PATH:
+                return start_share(self.directory, str(body.get("model") or ""), str(body.get("title") or "モデル"))
+            if path == SHARE_STOP_PATH:
+                stop_share()
+                return {"stopped": True}
             if path == LITE_PATH:
                 images = {int(k): (base64.b64decode(v["data"]), str(v["mime"])) for k, v in (body.get("images") or {}).items()}
                 return {"path": library.replace_images(self.directory, str(body.get("model") or ""), images)}
@@ -298,3 +307,114 @@ def serve(root: str, port: int = 8765, open_browser: bool = True) -> None:
         server.serve_forever()
     finally:
         server.server_close()
+
+
+# ---- Sharing one model with a phone on the same network ------------------------------------
+
+SHARE_MINUTES = 30
+_SHARE_PAGE = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{title}</title>
+<script type="module" src="model-viewer.min.js"></script>
+<style>html,body{{margin:0;height:100%;font-family:system-ui,sans-serif;background:#f3f3f0}}
+model-viewer{{width:100%;height:100%}} #ar{{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);
+font-size:17px;padding:12px 22px;border-radius:999px;border:none;background:#3a5bd9;color:#fff}}
+h1{{position:absolute;top:10px;left:14px;margin:0;font-size:15px;color:#333}}</style></head>
+<body><h1>{title}</h1><model-viewer src="model.glb" camera-controls auto-rotate ar ar-modes="webxr scene-viewer quick-look"
+environment-image="neutral" shadow-intensity="0.8"><button slot="ar-button" id="ar">AR で置いてみる</button></model-viewer></body></html>"""
+
+
+class _ShareHandler(SimpleHTTPRequestHandler):
+    """Serves exactly three things under the random path: the page, the model, model-viewer."""
+
+    def do_GET(self) -> None:
+        share: "ShareServer" = self.server  # type: ignore[assignment]
+        prefix = f"/{share.token}/"
+        path = self.path.split("?", 1)[0]
+        if path == prefix[:-1]:
+            self.send_response(301)
+            self.send_header("Location", prefix)
+            self.end_headers()
+            return
+        if not path.startswith(prefix):
+            self.send_error(404)
+            return
+        name = path[len(prefix):]
+        if name in ("", "index.html"):
+            page = _SHARE_PAGE.format(title=html_escape(share.title))
+            self._reply(page.encode("utf-8"), "text/html; charset=utf-8")
+        elif name == "model.glb":
+            with open(share.model_path, "rb") as handle:
+                self._reply(handle.read(), "model/gltf-binary")
+        elif name == "model-viewer.min.js":
+            self._reply(_asset("vendor/model-viewer.min.js"), "text/javascript; charset=utf-8")
+        else:
+            self.send_error(404)
+
+    def _reply(self, body: bytes, content_type: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+class ShareServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, model_path: str, title: str, host: str = "0.0.0.0"):
+        self.model_path, self.title = model_path, title
+        self.token = secrets.token_urlsafe(12)
+        super().__init__((host, 0), _ShareHandler)
+
+
+def lan_address() -> str:
+    """This PC's address on the local network (the one a phone on the same Wi-Fi can reach)."""
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))  # no packet is sent; this only picks the outgoing interface
+        return probe.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        probe.close()
+
+
+_share: Optional[ShareServer] = None
+_share_lock = threading.Lock()
+
+
+def stop_share() -> None:
+    global _share
+    with _share_lock:
+        if _share is not None:
+            _share.shutdown()
+            _share.server_close()
+            _share = None
+
+
+def start_share(root: str, model: str, title: str, host: str = "0.0.0.0") -> Dict[str, Any]:
+    """Share one .glb on the LAN for SHARE_MINUTES (replacing any earlier share).
+
+    host is only changed by tests, which must not open a port to the network.
+    """
+    global _share
+    path = library.safe_path(root, model)
+    if not (path.lower().endswith(".glb") and os.path.isfile(path)):
+        raise ValueError("スマホで見られるのは GLB だけです")
+    stop_share()
+    server = ShareServer(path, title, host)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    timer = threading.Timer(SHARE_MINUTES * 60, lambda: _share is server and stop_share())
+    timer.daemon = True
+    timer.start()
+    with _share_lock:
+        _share = server
+    address = lan_address() if host == "0.0.0.0" else host
+    url = f"http://{address}:{server.server_address[1]}/{server.token}/"
+    return {"url": url, "qr": qr.svg(url), "minutes": SHARE_MINUTES}

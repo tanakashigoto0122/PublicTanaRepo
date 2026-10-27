@@ -266,6 +266,7 @@
         <button class="btn" id="d-shot" title="今の表示を PNG で screenshots フォルダに保存します">画像として保存</button>
         <button class="btn" id="d-video" title="モデルが一周する動画（WebM）を screenshots フォルダに保存します">一周動画を保存</button>
         <button class="btn" id="d-stl" title="3D プリント用。mm 単位・Z が上・床に接地。クレジットは使いません">STL に変換</button>
+        <button class="btn" id="d-phone" title="同じ Wi-Fi のスマホで、このモデルを見たり AR で置いたりできます">スマホで見る</button>
         <button class="btn" id="d-lite" title="テクスチャを小さくした軽い GLB（_lite.glb）を別に作ります。元のファイルはそのまま">軽量化…</button>
         <button class="btn" id="d-obj" title="OBJ + MTL とベースカラーのテクスチャを、新しいフォルダに書き出します。クレジットは使いません">OBJ に変換</button>
         <button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button>
@@ -335,6 +336,15 @@
   <p class="note" id="dup-note"></p>
   <div class="picklist" id="dup-list"></div>
   <div class="actions"><button class="btn" data-close>閉じる</button><button class="btn primary" id="dup-select">2 個目以降を選択する</button></div>
+</dialog>
+
+<dialog class="form" id="dlg-phone">
+  <h3>スマホで見る</h3>
+  <p class="note">同じ Wi-Fi につないだスマホのカメラで読み取ってください。3D で回して見られ、対応するスマホでは「AR で置いてみる」で机の上などに置けます。</p>
+  <div id="phone-qr" style="display:grid;place-items:center;margin-bottom:10px"></div>
+  <p class="path" id="phone-url" style="text-align:center"></p>
+  <p class="note">このモデル 1 つだけを、30 分間（またはこの画面を閉じるまで）このネットワークに公開します。初めてのときは Windows のファイアウォールの確認が出るので、「プライベート ネットワーク」で許可してください。</p>
+  <div class="actions"><button class="btn primary" data-close>閉じて公開をやめる</button></div>
 </dialog>
 
 <dialog id="dlg-compare">
@@ -579,7 +589,7 @@ function open(i) {
   $('prev').hidden = $('next').hidden = shown.length < 2;
   $('d-anim-row').hidden = true;
   $('d-thumb').hidden = $('d-shot').hidden = $('d-video').hidden = $('d-stl').hidden = $('d-obj').hidden = !m.model;
-  $('d-lite').hidden = !m.model?.toLowerCase().endsWith('.glb');
+  $('d-lite').hidden = $('d-phone').hidden = !m.model?.toLowerCase().endsWith('.glb');
   showFavorite(m);
   $('d-memo').value = m.memo || '';
   renderTags(m);
@@ -1218,6 +1228,21 @@ $('d-lite').onclick = async () => {
     toast(`軽量化できませんでした: ${err.message}`, true, 10000);
   } finally { $('d-lite').disabled = false; }
 };
+
+// View on phone: the server shares this one model on the LAN (viewer.start_share) and gives a QR.
+$('d-phone').onclick = async () => {
+  const m = shown[current];
+  let res;
+  try {
+    res = await change('/__viewer/share', { method: 'POST', body: JSON.stringify({ model: m.model, title: label(m) }) });
+  } catch (err) { return toast(`公開できませんでした: ${err.message}`, true); }
+  $('phone-qr').innerHTML = res.qr;
+  $('phone-url').textContent = res.url;
+  $('dlg-phone').showModal();
+};
+$('dlg-phone').addEventListener('close', () => {
+  change('/__viewer/share/stop', { method: 'POST', body: '{}' }).catch(() => {});
+});
 
 // Free conversion on this PC (convert.py): STL for printing, OBJ with its textures.
 for (const fmt of ['stl', 'obj']) {

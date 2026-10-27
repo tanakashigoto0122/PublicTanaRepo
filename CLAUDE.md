@@ -97,6 +97,11 @@ Key constraints of the Tripo API that shape the design:
   "Lightweight" (`POST /__viewer/lite`): the page scales textures down on a canvas and sends them
   base64-encoded; `library.replace_images` rebuilds the BIN chunk into `<stem>_lite.glb`.
   Polygon reduction is not implemented (it would need an external simplifier such as gltfpack).
+  "View on phone" (`POST /__viewer/share`, `/__viewer/share/stop`): `viewer.start_share` runs a
+  second server on 0.0.0.0 that serves only one .glb, a small AR page and model-viewer under a
+  random path, for 30 minutes or until the dialog closes; the page shows a QR from `qr.py` (own
+  encoder: byte mode, level M, versions 1-6). Tests bind it to 127.0.0.1 (`host=`) so no firewall
+  prompt appears.
 - `src/tripo_export/app.py`: the desktop app. A pywebview window (Edge WebView2 on Windows)
   shows the same viewer page with `?app=1`. The page detects `window.pywebview` and adds
   `body.app`, which reveals the toolbar, dialogs and job bar (`.app-only`). The page calls
