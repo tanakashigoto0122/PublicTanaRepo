@@ -46,6 +46,7 @@ DELETE_PATH = "/__viewer/delete"
 MOVE_PATH = "/__viewer/move"
 CONVERT_PATH = "/__viewer/convert"
 LITE_PATH = "/__viewer/lite"
+SIMPLIFY_PATH = "/__viewer/simplify"
 SHARE_PATH = "/__viewer/share"
 SHARE_STOP_PATH = "/__viewer/share/stop"
 TOKEN_HEADER = "X-Viewer-Token"
@@ -220,7 +221,10 @@ class _Handler(SimpleHTTPRequestHandler):
                 return {"stopped": True}
             if path == LITE_PATH:
                 images = {int(k): (base64.b64decode(v["data"]), str(v["mime"])) for k, v in (body.get("images") or {}).items()}
-                return {"path": library.replace_images(self.directory, str(body.get("model") or ""), images)}
+                return {"path": library.replace_images(self.directory, str(body.get("model") or ""), images,
+                                                       in_place=bool(body.get("in_place")))}
+            if path == SIMPLIFY_PATH:
+                return {"path": convert.simplify(self.directory, str(body.get("model") or ""), float(body.get("ratio") or 0))}
             if path == CONVERT_PATH:
                 return {"path": convert.convert(self.directory, str(body.get("model") or ""), str(body.get("format") or ""))}
             if path == MOVE_PATH:

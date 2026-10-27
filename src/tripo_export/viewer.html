@@ -267,7 +267,7 @@
         <button class="btn" id="d-video" title="モデルが一周する動画（WebM）を screenshots フォルダに保存します">一周動画を保存</button>
         <button class="btn" id="d-stl" title="3D プリント用。mm 単位・Z が上・床に接地。クレジットは使いません">STL に変換</button>
         <button class="btn" id="d-phone" title="同じ Wi-Fi のスマホで、このモデルを見たり AR で置いたりできます">スマホで見る</button>
-        <button class="btn" id="d-lite" title="テクスチャを小さくした軽い GLB（_lite.glb）を別に作ります。元のファイルはそのまま">軽量化…</button>
+        <button class="btn" id="d-lite" title="ポリゴンやテクスチャを減らした軽い GLB（_lite.glb）を別に作ります。元のファイルはそのまま">軽量化…</button>
         <button class="btn" id="d-obj" title="OBJ + MTL とベースカラーのテクスチャを、新しいフォルダに書き出します。クレジットは使いません">OBJ に変換</button>
         <button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button>
       </div>
@@ -310,6 +310,25 @@
   <p class="note">生成には API クレジットを使います（GLB 以外の形式は変換分も追加）。完了まで数分かかります。</p>
   <p class="msg error" id="g-msg" hidden></p>
   <div class="actions"><button class="btn" data-close>キャンセル</button><button class="btn primary" id="g-start">生成する</button></div>
+</dialog>
+
+<dialog class="form" id="dlg-lite">
+  <h3>軽量化</h3>
+  <p class="note">軽くしたコピー（<code>名前_lite.glb</code>）を別に作ります。元のファイルはそのままです。</p>
+  <p class="note" id="lite-now"></p>
+  <div class="cols" style="grid-template-columns:1fr 1fr">
+    <label class="field"><span>ポリゴン数</span><select id="lite-ratio">
+      <option value="1">そのまま</option><option value="0.5">半分（50%）</option><option value="0.25">4 分の 1（25%）</option>
+      <option value="0.1">10 分の 1（10%）</option><option value="0.05">20 分の 1（5%）</option>
+    </select></label>
+    <label class="field"><span>テクスチャの最大サイズ</span><select id="lite-tex">
+      <option value="0">そのまま</option><option value="2048">2048px</option><option value="1024">1024px</option>
+      <option value="512">512px</option><option value="256">256px</option>
+    </select></label>
+  </div>
+  <p class="note">ポリゴンは形が崩れすぎないところで止まるので、指定より少し多めに残ることがあります。</p>
+  <p class="msg error" id="lite-msg" hidden></p>
+  <div class="actions"><button class="btn" data-close>キャンセル</button><button class="btn primary" id="lite-start">作る</button></div>
 </dialog>
 
 <dialog class="form app-only" id="dlg-import">
@@ -1181,52 +1200,76 @@ $('d-video').onclick = async () => {
   toast(`保存しました: ${res.path}`);
   if (appState) api().reveal(res.path);
 };
-// Lightweight copy: textures larger than the chosen size are scaled down here in the page
-// (canvas), and the server repacks them into <name>_lite.glb.
+// Lightweight copy: polygons are reduced by the server (gltfpack, convert.simplify), then
+// textures above the chosen size are scaled down here in the page (canvas) and repacked into
+// the same _lite.glb by the server.
+async function shrinkTextures(model, limit, inPlace) {
+  const list = await fetch(`/__viewer/textures?model=${encodeURIComponent(model)}`).then((r) => r.json());
+  if (list.error) throw new Error(list.error);
+  const targets = list.textures.filter((t) => Math.max(t.width || 0, t.height || 0) > limit);
+  if (!targets.length) return null;
+  const images = {};
+  for (const t of targets) {
+    const img = new Image();
+    img.src = `/__viewer/texture?model=${encodeURIComponent(model)}&index=${t.index}`;
+    await img.decode();
+    const scale = limit / Math.max(img.naturalWidth, img.naturalHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const mime = ['image/jpeg', 'image/webp'].includes(t.mime) ? t.mime : 'image/png';
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, mime, 0.9));
+    const data = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.readAsDataURL(blob);
+    });
+    images[t.index] = { mime, data };
+  }
+  const res = await change('/__viewer/lite', { method: 'POST', body: JSON.stringify({ model, images, in_place: inPlace }) });
+  return res.path;
+}
 $('d-lite').onclick = async () => {
   const m = shown[current];
-  const list = await fetch(`/__viewer/textures?model=${encodeURIComponent(m.model)}`).then((r) => r.json());
-  if (list.error) return toast(list.error, true);
-  const largest = Math.max(0, ...list.textures.map((t) => Math.max(t.width || 0, t.height || 0)));
-  if (!largest) return toast('このモデルには小さくできるテクスチャがありません', true);
-  const answer = prompt(`テクスチャの最大サイズ（今の最大は ${largest}px）。1024 や 512 など`, String(Math.max(256, largest / 2)));
-  const limit = Math.round(Number(answer));
-  if (!answer || !(limit >= 16)) return;
-  const targets = list.textures.filter((t) => Math.max(t.width || 0, t.height || 0) > limit);
-  if (!targets.length) return toast(`どのテクスチャも ${limit}px 以下です`, true);
-  $('d-lite').disabled = true;
-  toast(`テクスチャを縮小中… (${targets.length} 枚)`, false, 0);
+  showMsg('lite-msg', '');
+  $('lite-now').textContent = '今のモデルを調べています…';
+  $('dlg-lite').showModal();
+  const [stats, tex] = await Promise.all([
+    fetch(`/__viewer/stats?model=${encodeURIComponent(m.model)}`).then((r) => r.json()),
+    fetch(`/__viewer/textures?model=${encodeURIComponent(m.model)}`).then((r) => r.json()),
+  ]);
+  const largest = Math.max(0, ...(tex.textures || []).map((t) => Math.max(t.width || 0, t.height || 0)));
+  $('lite-now').textContent = `今: ${stats.triangles?.toLocaleString('ja-JP') ?? '?'} 三角形 · テクスチャ最大 ${largest ? largest + 'px' : 'なし'} · ${fmtSize(m.files.find((f) => f.path === m.model)?.size || 0)}`;
+};
+$('lite-start').onclick = async () => {
+  const m = shown[current];
+  const ratio = Number($('lite-ratio').value), limit = Number($('lite-tex').value);
+  if (ratio >= 1 && !limit) return showMsg('lite-msg', 'ポリゴン数かテクスチャのどちらかを選んでください');
+  $('lite-start').disabled = true;
+  showMsg('lite-msg', '作っています…（大きいモデルは数十秒かかります）', false);
   try {
-    const images = {};
-    for (const t of targets) {
-      const img = new Image();
-      img.src = `/__viewer/texture?model=${encodeURIComponent(m.model)}&index=${t.index}`;
-      await img.decode();
-      const scale = limit / Math.max(img.naturalWidth, img.naturalHeight);
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const mime = ['image/jpeg', 'image/webp'].includes(t.mime) ? t.mime : 'image/png';
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, mime, 0.9));
-      const data = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1]);
-        reader.readAsDataURL(blob);
-      });
-      images[t.index] = { mime, data };
+    let made = null;
+    if (ratio < 1) {
+      made = (await change('/__viewer/simplify', { method: 'POST', body: JSON.stringify({ model: m.model, ratio }) })).path;
     }
-    const res = await change('/__viewer/lite', { method: 'POST', body: JSON.stringify({ model: m.model, images }) });
+    if (limit) {
+      const shrunk = await shrinkTextures(made || m.model, limit, !!made);
+      made = shrunk || made;
+    }
+    if (!made) return showMsg('lite-msg', `どのテクスチャも ${limit}px 以下なので、変えるところがありません`);
+    $('dlg-lite').close();
     await load();
-    const made = models.find((x) => x.files.some((f) => f.path === res.path));
-    const after = made?.files.find((f) => f.path === res.path)?.size;
+    const st = await fetch(`/__viewer/stats?model=${encodeURIComponent(made)}`).then((r) => r.json());
+    const lite = models.find((x) => x.files.some((f) => f.path === made));
+    const after = lite?.files.find((f) => f.path === made)?.size;
     const before = m.files.find((f) => f.path === m.model)?.size;
-    toast(`作りました: ${res.path}${after && before ? `（${fmtSize(before)} → ${fmtSize(after)}）` : ''}`, false, 8000);
+    toast(`作りました: ${made}（${st.triangles?.toLocaleString('ja-JP')} 三角形・${fmtSize(before)} → ${fmtSize(after || 0)}）`, false, 10000);
   } catch (err) {
-    toast(`軽量化できませんでした: ${err.message}`, true, 10000);
-  } finally { $('d-lite').disabled = false; }
+    showMsg('lite-msg', `軽量化できませんでした: ${err.message}`);
+  } finally { $('lite-start').disabled = false; }
 };
 
 // View on phone: the server shares this one model on the LAN (viewer.start_share) and gives a QR.

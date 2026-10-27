@@ -23,6 +23,19 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Polygon reduction uses gltfpack from meshoptimizer; the release zip is pinned by hash.
+      - name: Fetch gltfpack
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.3 -R zeux/meshoptimizer -p gltfpack-windows.zip -D $env:RUNNER_TEMP
+          $zip = Join-Path $env:RUNNER_TEMP "gltfpack-windows.zip"
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne "f6e9c09d66af23da3da71b86f0652d2413e81c734e0aecd1cd3d0e6e6e8645c0") { Write-Error "unexpected gltfpack zip: $hash"; exit 1 }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP\gltfpack
+          Copy-Item $env:RUNNER_TEMP\gltfpack\gltfpack.exe src\tripo_export\vendor\gltfpack.exe
+
       - name: Install
         run: |
           python -m pip install --upgrade pip

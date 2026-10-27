@@ -136,6 +136,46 @@ class ConvertTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             library.replace_images(self.root, "tile.glb", {5: (small, "image/png")})
 
+    @unittest.skipUnless(convert.gltfpack_path(), "gltfpack is not installed here (the exe bundles it)")
+    def test_simplify_reduces_triangles_and_lite_copy_can_shrink_in_place(self):
+        # A 40x40 grid of quads (3200 triangles) with a bump, so there is something to simplify.
+        n = 41
+        pos = [(i / (n - 1) - 0.5, 0.2 * math.exp(-((i - 20) ** 2 + (j - 20) ** 2) / 60), j / (n - 1) - 0.5)
+               for j in range(n) for i in range(n)]
+        idx = [k for j in range(n - 1) for i in range(n - 1)
+               for k in (j * n + i, (j + 1) * n + i, j * n + i + 1, j * n + i + 1, (j + 1) * n + i, (j + 1) * n + i + 1)]
+        binary = b"".join(struct.pack("<3f", *p) for p in pos)
+        indices = b"".join(struct.pack("<I", k) for k in idx)
+        gltf = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0}],
+                "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
+                "buffers": [{"byteLength": len(binary) + len(indices)}],
+                "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(binary)},
+                                {"buffer": 0, "byteOffset": len(binary), "byteLength": len(indices)}],
+                "accessors": [{"bufferView": 0, "componentType": 5126, "count": len(pos), "type": "VEC3",
+                               "min": [-0.5, 0, -0.5], "max": [0.5, 0.2, 0.5]},
+                              {"bufferView": 1, "componentType": 5125, "count": len(idx), "type": "SCALAR"}]}
+        touch(self.root, "bump.glb", make_glb(gltf, binary + indices))
+        rel = convert.simplify(self.root, "bump.glb", 0.25)
+        self.assertEqual(rel, "bump_lite.glb")
+        before = library.glb_stats(self.root, "bump.glb")["triangles"]
+        after = library.glb_stats(self.root, rel)["triangles"]
+        self.assertEqual(before, 3200)
+        self.assertLess(after, before * 0.6)
+        self.assertGreater(after, 0)
+        self.assertEqual(convert.simplify(self.root, "bump.glb", 0.5), "bump_lite (2).glb")
+        with self.assertRaises(ValueError):
+            convert.simplify(self.root, "bump.glb", 1.5)
+
+    def test_in_place_rewrite_only_for_lite_copies(self):
+        touch(self.root, "tile.glb", mesh_glb([{"mesh": 0}], image=make_png(64, 64)))
+        small = make_png(16, 16)
+        with self.assertRaises(ValueError):
+            library.replace_images(self.root, "tile.glb", {0: (small, "image/png")}, in_place=True)
+        lite = library.replace_images(self.root, "tile.glb", {0: (make_png(32, 32), "image/png")})
+        self.assertEqual(library.replace_images(self.root, lite, {0: (small, "image/png")}, in_place=True), lite)
+        self.assertEqual(library.list_textures(self.root, lite)[0]["width"], 16)
+        self.assertEqual(sorted(os.listdir(self.root)), ["tile.glb", "tile_lite.glb"])
+
     def test_compressed_and_unsupported_inputs_are_refused(self):
         touch(self.root, "draco.glb", mesh_glb([{"mesh": 0}], extra={"extensionsRequired": ["KHR_draco_mesh_compression"]}))
         with self.assertRaisesRegex(ValueError, "Draco"):

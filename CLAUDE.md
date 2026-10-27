@@ -96,7 +96,11 @@ Key constraints of the Tripo API that shape the design:
   Draco/meshopt-compressed files are refused. About 2.5 s for 500k triangles.
   "Lightweight" (`POST /__viewer/lite`): the page scales textures down on a canvas and sends them
   base64-encoded; `library.replace_images` rebuilds the BIN chunk into `<stem>_lite.glb`.
-  Polygon reduction is not implemented (it would need an external simplifier such as gltfpack).
+  Polygon reduction (`POST /__viewer/simplify`, `convert.simplify`) runs gltfpack `-si <ratio> -noq`
+  into `<stem>_lite.glb`; texture shrinking can then rewrite that lite file in place
+  (`replace_images(..., in_place=True)`, refused for anything not named `_lite`). gltfpack.exe is
+  not committed: CI and `build.ps1` download meshoptimizer v1.3 (SHA-256 pinned) into `vendor/`, and
+  `--self-test` fails without it. Locally, put it in `vendor/` or set `TRIPO_GLTFPACK`.
   "View on phone" (`POST /__viewer/share`, `/__viewer/share/stop`): `viewer.start_share` runs a
   second server on 0.0.0.0 that serves only one .glb, a small AR page and model-viewer under a
   random path, for 30 minutes or until the dialog closes; the page shows a QR from `qr.py` (own

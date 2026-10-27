@@ -742,8 +742,11 @@ def list_backgrounds(root: str) -> List[str]:
 LITE_SUFFIX = "_lite"
 
 
-def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]]) -> str:
+def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]], in_place: bool = False) -> str:
     """Write ``<stem>_lite.glb`` next to a .glb with some embedded images replaced.
+
+    With ``in_place`` a file that is already a lite copy (from ``convert.simplify``) is
+    rewritten instead; originals are never overwritten.
 
     ``images`` maps image index to (new bytes, MIME type), e.g. the same textures at a smaller
     size. The binary chunk is rebuilt with every buffer view re-packed (4-byte aligned) and the
@@ -786,6 +789,8 @@ def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]]) 
     text += b" " * (-len(text) % 4)
     body = (struct.pack("<II", len(text), _GLB_JSON_CHUNK) + text
             + struct.pack("<II", len(binary), 0x004E4942) + binary)
-    target = unique_path(os.path.splitext(path)[0] + LITE_SUFFIX + ".glb")
+    if in_place and not os.path.splitext(os.path.basename(path))[0].split(" (")[0].endswith(LITE_SUFFIX):
+        raise ValueError("上書きできるのは軽量化したファイル（_lite.glb）だけです")
+    target = path if in_place else unique_path(os.path.splitext(path)[0] + LITE_SUFFIX + ".glb")
     _write(target, io.BytesIO(struct.pack("<III", _GLB_MAGIC, 2, 12 + len(body)) + body), 12 + len(body))
     return _rel(root, target)

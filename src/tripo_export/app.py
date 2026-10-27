@@ -326,6 +326,10 @@ def self_test(report_path: Optional[str]) -> int:
         import tripo3d
         import webview  # noqa: F401
         lines.append(f"tripo3d {getattr(tripo3d, '__version__', '?')}, webview ok, keyring ok")
+        from .convert import gltfpack_path
+        if not gltfpack_path():
+            raise RuntimeError("gltfpack is not bundled")
+        lines.append("gltfpack ok")
         with tempfile.TemporaryDirectory() as folder:
             server = make_server(folder, port=0)
             threading.Thread(target=server.serve_forever, daemon=True).start()

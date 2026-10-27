@@ -7,3 +7,6 @@ build/
 dist/
 *.spec
 .venv-build/
+
+# Downloaded at build time (meshoptimizer release), not committed
+src/tripo_export/vendor/gltfpack.exe

@@ -9,7 +9,7 @@ import math
 import os
 import struct
 from array import array
-from typing import Any, Dict, Iterator, List, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from . import library
 
@@ -269,3 +269,52 @@ def convert(root: str, model: str, fmt: str) -> str:
     if fmt == "obj":
         return to_obj(root, model)
     raise ValueError(f"対応していない形式です: {fmt}")
+
+
+# ---- Polygon reduction with gltfpack (meshoptimizer) ----------------------------------------
+
+GLTFPACK_ENV = "TRIPO_GLTFPACK"
+
+
+def gltfpack_path() -> Optional[str]:
+    """gltfpack: $TRIPO_GLTFPACK, the copy bundled in vendor/ (the exe has one), or PATH."""
+    import shutil
+
+    candidates = [os.environ.get(GLTFPACK_ENV),
+                  os.path.join(os.path.dirname(__file__), "vendor", "gltfpack.exe" if os.name == "nt" else "gltfpack"),
+                  shutil.which("gltfpack")]
+    return next((c for c in candidates if c and os.path.isfile(c)), None)
+
+
+def simplify(root: str, model: str, ratio: float) -> str:
+    """Write ``<stem>_lite.glb`` with about ``ratio`` of the triangles (0 < ratio < 1).
+
+    gltfpack keeps UV seams and normals sensible and stops early rather than wrecking the shape
+    (its default 1% error limit), so the result can keep somewhat more than asked for.
+    ``-noq`` keeps plain float attributes so every loader (and convert.py) can read the file.
+    """
+    import subprocess
+
+    path = library.safe_path(root, model)
+    if os.path.splitext(path)[1].lower() not in library.VIEWABLE:
+        raise ValueError("ポリゴン削減できるのは GLB / glTF だけです")
+    if not 0 < ratio < 1:
+        raise ValueError("残す割合は 0 より大きく 1 より小さくしてください")
+    tool = gltfpack_path()
+    if not tool:
+        raise ValueError("ポリゴン削減のツール（gltfpack）が見つかりません")
+    target = library.unique_path(os.path.splitext(path)[0] + library.LITE_SUFFIX + ".glb")
+    part = target + ".part.glb"
+    try:
+        result = subprocess.run(
+            [tool, "-i", path, "-o", part, "-si", f"{ratio:.4f}", "-noq"],
+            capture_output=True, text=True, timeout=600,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if result.returncode != 0 or not os.path.isfile(part):
+            message = (result.stderr or result.stdout).strip().splitlines()
+            raise ValueError("ポリゴン削減に失敗しました: " + (message[-1] if message else f"code {result.returncode}"))
+        os.replace(part, target)
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+    return library._rel(root, target)
