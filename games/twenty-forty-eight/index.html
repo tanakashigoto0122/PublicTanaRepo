@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2048</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <style>
+    .scores { display: flex; gap: 16px; margin: 12px 0 0; }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      width: min(100%, 360px);
+      aspect-ratio: 1;
+      margin: 12px 0;
+      padding: 6px;
+      background: var(--border);
+      border-radius: 10px;
+      /* スワイプ中にページがスクロールしないようにする */
+      touch-action: none;
+      user-select: none;
+    }
+    .cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1.5rem;
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    /* 数字が大きいほどアクセント色を濃くする（--level は main.js が 1〜11 で設定） */
+    .cell.filled {
+      background: color-mix(in srgb, var(--accent) calc(var(--level) * 9%), var(--tile));
+    }
+    .cell.filled.strong { color: var(--surface); }
+    .cell.small { font-size: 1.15rem; }
+    .status { min-height: 1.6em; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>2048</h1>
+    <p class="muted">矢印キー・WASD・スワイプでタイルを動かそう。同じ数字がぶつかると合体する。2048 を作ればクリア！</p>
+    <div class="scores">
+      <span>スコア: <strong id="score">0</strong></span>
+      <span>ベスト: <strong id="best">0</strong></span>
+    </div>
+    <div class="board" id="board"></div>
+    <p class="status" id="status"></p>
+    <button id="reset">はじめから</button>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

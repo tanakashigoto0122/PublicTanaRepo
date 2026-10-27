@@ -6,4 +6,9 @@ export const games = [
     title: '15パズル',
     description: '数字のタイルをスライドさせて 1〜15 の順に並べる定番パズル。',
   },
+  {
+    id: 'twenty-forty-eight',
+    title: '2048',
+    description: 'タイルを上下左右に寄せて同じ数字を合体させ、2048 を目指すパズル。',
+  },
 ];
