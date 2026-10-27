@@ -106,6 +106,9 @@ Key constraints of the Tripo API that shape the design:
   positions and parents and a humanoid check against Mixamo/VRM/Rigify-style names; "骨を表示" draws
   them like the dimension lines. `convert` format `mixamo` zips the OBJ export for Mixamo.
   `tests/rigged_sample.py` builds a small skinned humanoid for tests and manual checks.
+  App-only "Unity に送る" (`AppApi.send_to_unity`, `library.send_to_unity`) copies FBX/GLB/glTF/OBJ
+  into `<unity project>/Assets/TripoGame/Characters`; the project is `settings.unity_project` or
+  `~/UnityProjects/TripoGame` (the companion project the TripoGame folder holds).
   "View on phone" (`POST /__viewer/share`, `/__viewer/share/stop`): `viewer.start_share` runs a
   second server on 0.0.0.0 that serves only one .glb, a small AR page and model-viewer under a
   random path, for 30 minutes or until the dialog closes; the page shows a QR from `qr.py` (own

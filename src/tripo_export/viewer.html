@@ -270,6 +270,7 @@
         <button class="btn" id="d-shot" title="今の表示を PNG で screenshots フォルダに保存します">画像として保存</button>
         <button class="btn" id="d-video" title="モデルが一周する動画（WebM）を screenshots フォルダに保存します">一周動画を保存</button>
         <button class="btn" id="d-stl" title="3D プリント用。mm 単位・Z が上・床に接地。クレジットは使いません">STL に変換</button>
+        <button class="btn app-only" id="d-unity" title="FBX / GLB を Unity プロジェクト（TripoGame）の Characters フォルダにコピーします">Unity に送る</button>
         <button class="btn" id="d-phone" title="同じ Wi-Fi のスマホで、このモデルを見たり AR で置いたりできます">スマホで見る</button>
         <button class="btn" id="d-lite" title="ポリゴンやテクスチャを減らした軽い GLB（_lite.glb）を別に作ります。元のファイルはそのまま">軽量化…</button>
         <button class="btn" id="d-mixamo" title="Mixamo（無料の自動リグ付け）にそのまま上げられる zip（OBJ + テクスチャ）を作ります">Mixamo 用 zip</button>
@@ -356,6 +357,9 @@
   <label class="field"><span>Tripo API キー（tsk_ で始まる文字列）</span><input type="password" id="s-key" autocomplete="off"></label>
   <p class="note">API キーは <a href="https://platform.tripo3d.ai/" target="_blank" rel="noreferrer">platform.tripo3d.ai</a> で作れます。Windows の資格情報マネージャーに保存され、このPCの外には送られません（Tripo API への通信を除く）。Studio のクレジットとは別に、API 用のクレジットが必要です。</p>
   <div class="row"><label><input type="checkbox" id="s-china"> 中国リージョン（openapi.tripo3d.com）を使う</label></div>
+  <div class="field"><span>Unity プロジェクト（「Unity に送る」の送り先）</span>
+    <div class="row tight"><button class="btn" id="s-unity">フォルダを選ぶ…</button><span class="path" id="s-unity-path"></span></div>
+  </div>
   <div class="row"><button class="btn" id="s-balance">残高を確認</button><span id="s-balance-text" class="path"></span></div>
   <p class="msg" id="s-msg" hidden></p>
   <div class="actions"><button class="btn" data-close>閉じる</button><button class="btn primary" id="s-save">保存</button></div>
@@ -1504,6 +1508,7 @@ function openSettings() {
   $('s-key').value = '';
   $('s-key').placeholder = appState.has_key ? '設定済み（変更する場合だけ入力）' : 'tsk_...';
   $('s-china').checked = appState.china;
+  $('s-unity-path').textContent = appState.unity_project || '未設定';
   $('s-balance-text').textContent = '';
   showMsg('s-msg', appState.has_key ? '' : 'まず API キーを入力してください', false);
   $('dlg-settings').showModal();
@@ -1585,6 +1590,17 @@ $('g-start').onclick = async () => {
   pollJob();
 };
 
+$('s-unity').onclick = async () => {
+  const folder = await api().choose_unity_project();
+  if (folder) { appState.unity_project = folder; $('s-unity-path').textContent = folder; }
+  else showMsg('s-msg', 'Unity プロジェクトのフォルダ（Assets がある所）を選んでください');
+};
+$('d-unity').onclick = async () => {
+  const m = shown[current];
+  const res = await api().send_to_unity(m.files.map((f) => f.path));
+  if (res.error) return toast(res.error, true, 8000);
+  toast(`Unity に送りました: ${res.sent.join(', ')}（Unity の Project ウィンドウ → TripoGame/Characters）`, false, 8000);
+};
 $('s-save').onclick = async () => {
   const values = { china: $('s-china').checked };
   if ($('s-key').value.trim()) values.api_key = $('s-key').value.trim();

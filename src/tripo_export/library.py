@@ -794,3 +794,37 @@ def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]], 
     target = path if in_place else unique_path(os.path.splitext(path)[0] + LITE_SUFFIX + ".glb")
     _write(target, io.BytesIO(struct.pack("<III", _GLB_MAGIC, 2, 12 + len(body)) + body), 12 + len(body))
     return _rel(root, target)
+
+
+# ---- Handing models to a Unity project -----------------------------------------------------
+
+UNITY_CHARACTERS = "Assets/TripoGame/Characters"
+_UNITY_SEND = (".fbx", ".glb", ".gltf", ".obj")
+
+
+def is_unity_project(folder: str) -> bool:
+    return os.path.isdir(os.path.join(folder, "Assets")) and os.path.isdir(os.path.join(folder, "ProjectSettings")) \
+        or os.path.isdir(os.path.join(folder, "Assets", "TripoGame"))
+
+
+def send_to_unity(root: str, files: List[str], project: str) -> List[str]:
+    """Copy a model's files Unity can import (FBX/GLB/glTF/OBJ) into the project's Characters folder.
+
+    Existing files are not overwritten (``name (2).fbx``). Returns the copied paths relative
+    to the Unity project.
+    """
+    if not is_unity_project(project):
+        raise ValueError(f"Unity プロジェクトのフォルダではありません: {project}")
+    target = os.path.join(project, *UNITY_CHARACTERS.split("/"))
+    os.makedirs(target, exist_ok=True)
+    sent = []
+    for rel in files:
+        if os.path.splitext(rel)[1].lower() not in _UNITY_SEND:
+            continue
+        src = safe_path(root, rel)
+        dst = unique_path(os.path.join(target, os.path.basename(src)))
+        shutil.copy2(src, dst)
+        sent.append(os.path.relpath(dst, project).replace(os.sep, "/"))
+    if not sent:
+        raise ValueError("Unity に送れるファイル（FBX / GLB / glTF / OBJ）がありません")
+    return sent

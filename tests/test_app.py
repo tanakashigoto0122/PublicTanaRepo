@@ -133,6 +133,23 @@ class AppApiTests(unittest.TestCase):
             self.assertTrue(self.api.list_downloads()["files"][0]["imported"])
         self.assertTrue(os.path.exists(os.path.join(downloads, "cat.glb")))
 
+    def test_send_to_unity_copies_importable_files(self):
+        project = os.path.join(self._tmp.name, "TripoGame")
+        os.makedirs(os.path.join(project, "Assets", "TripoGame"))
+        for name in ("hero.fbx", "hero.glb", "hero.stl", "hero_preview.webp"):
+            with open(os.path.join(self.folder, name), "wb") as handle:
+                handle.write(name.encode())
+        self.assertIn("error", self.api.send_to_unity(["hero.fbx"]) if not app.default_unity_project() else
+                      {"error": "skipped: a real TripoGame project exists on this PC"})
+        self.settings.values["unity_project"] = project
+        res = self.api.send_to_unity(["hero.fbx", "hero.glb", "hero.stl", "hero_preview.webp"])
+        self.assertEqual(res["sent"], ["Assets/TripoGame/Characters/hero.fbx", "Assets/TripoGame/Characters/hero.glb"])
+        again = self.api.send_to_unity(["hero.fbx"])
+        self.assertEqual(again["sent"], ["Assets/TripoGame/Characters/hero (2).fbx"])
+        self.assertIn("error", self.api.send_to_unity(["hero.stl"]))
+        self.settings.values["unity_project"] = self.folder  # not a Unity project
+        self.assertIn("error", self.api.send_to_unity(["hero.fbx"]))
+
     def test_set_folder_and_reveal_stays_inside(self):
         other = os.path.join(self._tmp.name, "other")
         self.api.set_folder(other)

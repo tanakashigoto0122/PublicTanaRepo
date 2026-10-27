@@ -31,6 +31,12 @@ def config_dir() -> str:
     return os.path.join(base, "TripoModelManager")
 
 
+def default_unity_project() -> Optional[str]:
+    """The TripoGame project made for this app, when it exists."""
+    path = os.path.join(os.path.expanduser("~"), "UnityProjects", "TripoGame")
+    return path if library.is_unity_project(path) else None
+
+
 def default_folder() -> str:
     return os.path.join(os.path.expanduser("~"), "Documents", "TripoModels")
 
@@ -129,7 +135,8 @@ class AppApi:
         return {"folder": self._server.root, "has_key": bool(self._settings.api_key()),
                 "china": bool(self._settings.values.get("china")),
                 "model_version": self._settings.values.get("model_version") or DEFAULT_MODEL_VERSION,
-                "formats": list(FORMATS), "version": __version__}
+                "formats": list(FORMATS), "version": __version__,
+                "unity_project": self._settings.values.get("unity_project") or default_unity_project()}
 
     def save_settings(self, values: Dict[str, Any]) -> Dict[str, Any]:
         stored = True
@@ -178,6 +185,29 @@ class AppApi:
         if not picked:
             return None
         return picked[0] if isinstance(picked, (list, tuple)) else picked
+
+    def choose_unity_project(self) -> Optional[str]:
+        import webview
+
+        start = self._settings.values.get("unity_project") or default_unity_project() or os.path.expanduser("~")
+        picked = self._window.create_file_dialog(webview.FileDialog.FOLDER, directory=start)
+        if not picked:
+            return None
+        folder = picked[0] if isinstance(picked, (list, tuple)) else picked
+        if not library.is_unity_project(folder):
+            return None
+        self._settings.values["unity_project"] = folder
+        self._settings.save()
+        return folder
+
+    def send_to_unity(self, files: List[str]) -> Dict[str, Any]:
+        project = self._settings.values.get("unity_project") or default_unity_project()
+        if not project:
+            return {"error": "Unity プロジェクトが設定されていません。設定で選んでください"}
+        try:
+            return {"sent": library.send_to_unity(self._server.root, list(files), project), "project": project}
+        except (ValueError, OSError) as exc:
+            return {"error": _error_text(exc)}
 
     def open_folder(self) -> None:
         _reveal(self._server.root)
