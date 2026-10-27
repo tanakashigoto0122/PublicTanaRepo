@@ -60,6 +60,18 @@
   .star { border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 8px;
           padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; align-self: flex-start; }
   .star.on { color: #c88a00; border-color: #e8a400; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .tag { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; background: var(--surface-2);
+         border: 1px solid var(--border); border-radius: 999px; padding: 1px 4px 1px 9px; }
+  .tag button { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 0 3px; }
+  #d-tag-input { font: inherit; font-size: 12px; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+                 border-radius: 999px; padding: 2px 9px; width: 120px; }
+  .card .tagline { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .texgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; margin-top: 8px; }
+  .texgrid figure { margin: 0; font-size: 11px; color: var(--muted); }
+  .texgrid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; border: 1px solid var(--border);
+                 background: repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 12px 12px; cursor: zoom-in; }
+  #d-texbox summary { font-size: 13px; cursor: pointer; }
   #d-memo { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--border);
             border-radius: 8px; padding: 8px 10px; min-height: 60px; resize: vertical; width: 100%; }
   .badge { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 650; letter-spacing: .04em;
@@ -168,10 +180,12 @@
       <option value="size">サイズの大きい順</option>
     </select>
     <select id="f-folder" aria-label="フォルダ" hidden></select>
+    <select id="f-tag" aria-label="タグ" hidden></select>
     <select id="f-fav" aria-label="お気に入り">
       <option value="">すべて</option>
       <option value="fav">★ お気に入り</option>
     </select>
+    <button class="btn" id="dup-open" title="同じ中身のモデルファイルを探します">重複チェック</button>
     <button class="btn" id="sel-toggle" title="複数のモデルを選んで、まとめて操作します（Ctrl+クリックでも選べます）">選択</button>
   </div>
   <div class="appbar app-only">
@@ -191,6 +205,7 @@
     <span class="n" id="sel-n"></span>
     <button class="btn" id="sel-all">表示中をすべて選択</button>
     <button class="btn" id="sel-fav">★ お気に入りにする</button>
+    <button class="btn" id="sel-tag">タグを付ける…</button>
     <button class="btn" id="sel-move">フォルダへ移動…</button>
     <button class="btn" id="sel-compare" title="2 個選ぶと並べて見比べられます">並べて比較</button>
     <button class="btn danger" id="sel-delete">削除</button>
@@ -212,7 +227,13 @@
       <button class="star" id="d-fav">☆ お気に入り</button>
       <div class="prompt" id="d-prompt" hidden></div>
       <dl id="d-info"></dl>
+      <div class="tags" id="d-tags"></div>
       <textarea id="d-memo" placeholder="メモ（検索の対象になります）"></textarea>
+      <details id="d-texbox" hidden>
+        <summary id="d-texsum">テクスチャ</summary>
+        <div class="texgrid" id="d-tex"></div>
+        <button class="btn" id="d-texexport" style="margin-top:8px">テクスチャを画像で書き出す</button>
+      </details>
       <div class="controls">
         <label><input type="checkbox" id="c-rotate" checked> 自動回転</label>
         <label>背景 <select id="c-bg">
@@ -297,6 +318,13 @@
   <div class="actions"><button class="btn" data-close>閉じる</button><button class="btn primary" id="s-save">保存</button></div>
 </dialog>
 
+<dialog class="form" id="dlg-dup">
+  <h3>重複チェック</h3>
+  <p class="note" id="dup-note"></p>
+  <div class="picklist" id="dup-list"></div>
+  <div class="actions"><button class="btn" data-close>閉じる</button><button class="btn primary" id="dup-select">2 個目以降を選択する</button></div>
+</dialog>
+
 <dialog id="dlg-compare">
   <div class="comparebar"><span class="t">並べて比較（どちらを回しても同じ角度になります）</span>
     <label><input type="checkbox" id="cmp-rotate"> 自動回転</label><button class="btn" id="cmp-close">閉じる</button></div>
@@ -357,11 +385,20 @@ async function load() {
 }
 
 function render() {
+  // Tag filter, listing every tag with how many models carry it.
+  const counts = new Map();
+  for (const m of models) for (const t of m.tags) counts.set(t, (counts.get(t) || 0) + 1);
+  const tagNames = [...counts.keys()].sort((a, b) => a.localeCompare(b, 'ja'));
+  const pickedTag = $('f-tag').value || store.get('tripo-viewer-tag') || '';
+  $('f-tag').replaceChildren(new Option('すべてのタグ', ''), ...tagNames.map((t) => new Option(`# ${t} (${counts.get(t)})`, t)));
+  $('f-tag').value = tagNames.includes(pickedTag) ? pickedTag : '';
+  $('f-tag').hidden = !tagNames.length;
   const q = $('q').value.trim().toLowerCase();
   const sort = $('sort').value;
   const folder = $('f-folder').value, favOnly = $('f-fav').value === 'fav';
-  shown = models.filter((m) => (!q || [m.title, m.prompt, m.task_id, m.memo].some((v) => v && v.toLowerCase().includes(q)))
-    && (folder === '*' || m.folder === folder) && (!favOnly || m.favorite));
+  const tag = $('f-tag').value;
+  shown = models.filter((m) => (!q || [m.title, m.prompt, m.task_id, m.memo, ...m.tags].some((v) => v && v.toLowerCase().includes(q)))
+    && (folder === '*' || m.folder === folder) && (!favOnly || m.favorite) && (!tag || m.tags.includes(tag)));
   const date = (m) => m.created || m.modified;
   shown.sort({
     new: (a, b) => date(b).localeCompare(date(a)),
@@ -382,6 +419,12 @@ function render() {
       <div class="meta"><div class="title"></div><div class="sub"></div></div>`;
     card.querySelector('.title').textContent = label(m);
     card.querySelector('.sub').textContent = `${fmtDate(date(m))} · ${fmtSize(totalSize(m))}`;
+    if (m.tags.length) {
+      const line = document.createElement('div');
+      line.className = 'tagline';
+      line.textContent = m.tags.map((t) => `#${t}`).join(' ');
+      card.querySelector('.meta').append(line);
+    }
     card.title = label(m);
     if (m.favorite) {
       const star = document.createElement('span');
@@ -526,7 +569,9 @@ function open(i) {
   $('d-thumb').hidden = $('d-shot').hidden = !m.model;
   showFavorite(m);
   $('d-memo').value = m.memo || '';
-  if (m.model) showStats(m);
+  renderTags(m);
+  $('d-texbox').hidden = true;
+  if (m.model) { showStats(m); showTextures(m); }
   if (!$('dlg').open) $('dlg').showModal();
 }
 
@@ -548,6 +593,45 @@ async function showStats(m) {
                    (st.skins ? ` · リグあり` : '') + (st.animations ? ` · アニメーション ${st.animations}` : ''));
   } catch { /* stats are a nice-to-have */ }
 }
+
+// The model's images with what they are used for; clicking one opens it full size.
+async function showTextures(m) {
+  try {
+    const res = await fetch(`/__viewer/textures?model=${encodeURIComponent(m.model)}`).then((r) => r.json());
+    if (res.error || shown[current] !== m || !res.textures.length) return;
+    $('d-texsum').textContent = `テクスチャ（${res.textures.length} 枚）`;
+    $('d-tex').replaceChildren(...res.textures.map((t) => {
+      const fig = document.createElement('figure');
+      const img = new Image();
+      img.loading = 'lazy';
+      img.src = `/__viewer/texture?model=${encodeURIComponent(m.model)}&index=${t.index}`;
+      img.onclick = () => {
+        const box = document.createElement('div');
+        box.style.cssText = 'position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.8);display:grid;place-items:center;cursor:zoom-out';
+        const big = new Image();
+        big.src = img.src;
+        big.style.cssText = 'max-width:92vw;max-height:92vh;background:repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/16px 16px';
+        box.append(big);
+        box.onclick = () => box.remove();
+        $('dlg').append(box);
+      };
+      const cap = document.createElement('figcaption');
+      cap.textContent = `${t.uses.join('・') || '未使用'} · ${t.width ? `${t.width}×${t.height}` : '?'} · ${fmtSize(t.bytes)}`;
+      fig.append(img, cap);
+      return fig;
+    }));
+    $('d-texbox').hidden = false;
+  } catch { /* the texture list is a nice-to-have */ }
+}
+$('d-texexport').onclick = async () => {
+  const m = shown[current];
+  let res;
+  try {
+    res = await change('/__viewer/textures/export', { method: 'POST', body: JSON.stringify({ model: m.model }) });
+  } catch (err) { return toast(`書き出せませんでした: ${err.message}`, true); }
+  toast(`書き出しました: ${res.folder}`);
+  if (appState) api().reveal(res.folder);
+};
 
 function showFavorite(m) {
   $('d-fav').classList.toggle('on', !!m.favorite);
@@ -586,6 +670,7 @@ $('d-play').onclick = () => {
 $('q').oninput = render;
 $('f-folder').onchange = () => { store.set('tripo-viewer-folder', $('f-folder').value); render(); };
 $('f-fav').onchange = render;
+$('f-tag').onchange = () => { store.set('tripo-viewer-tag', $('f-tag').value); render(); };
 $('sort').onchange = () => { store.set('tripo-viewer-sort', $('sort').value); render(); };
 $('prev').onclick = () => open(current - 1);
 $('next').onclick = () => open(current + 1);
@@ -694,11 +779,44 @@ $('d-thumb').onclick = async () => {
   await load();
   toast('サムネイルを保存しました');
 };
+// Tags of the open model: chips with a remove button, and an input that adds on Enter or comma.
+function renderTags(m) {
+  const chips = m.tags.map((t) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag';
+    chip.textContent = `# ${t}`;
+    const x = document.createElement('button');
+    x.textContent = '×';
+    x.title = 'このタグを外す';
+    x.onclick = async () => { await saveMeta(m, { tags: m.tags.filter((v) => v !== t) }); renderTags(m); };
+    chip.append(x);
+    return chip;
+  });
+  const input = document.createElement('input');
+  input.id = 'd-tag-input';
+  input.placeholder = '+ タグ';
+  input.setAttribute('list', 'tag-names');
+  input.onkeydown = async (e) => {
+    if (e.key !== 'Enter' && e.key !== ',' && e.key !== '、') return;
+    e.preventDefault();
+    const add = input.value.split(/[,、]/).map((v) => v.trim()).filter(Boolean);
+    if (!add.length) return;
+    await saveMeta(m, { tags: [...m.tags, ...add] });
+    renderTags(m);
+    $('d-tag-input').focus();
+  };
+  const list = document.createElement('datalist');
+  list.id = 'tag-names';
+  list.append(...[...new Set(models.flatMap((x) => x.tags))].map((t) => new Option(t)));
+  $('d-tags').replaceChildren(...chips, input, list);
+}
+
 async function saveMeta(m, values) {
   try {
     const entry = await change('/__viewer/meta', { method: 'POST', body: JSON.stringify({ key: m.key, ...values }) });
     m.favorite = !!entry.favorite;
     m.memo = entry.memo || '';
+    m.tags = entry.tags || [];
   } catch (err) { toast(`保存できませんでした: ${err.message}`, true); }
 }
 $('d-fav').onclick = async () => {
@@ -735,7 +853,7 @@ function updateSelbar() {
   for (const key of [...selected]) if (!models.some((m) => m.key === key)) selected.delete(key);
   $('selbar').hidden = !selecting;
   $('sel-n').textContent = selected.size ? `${selected.size} 個選択中` : 'カードをクリックして選んでください';
-  for (const id of ['sel-fav', 'sel-move', 'sel-delete']) $(id).disabled = !selected.size;
+  for (const id of ['sel-fav', 'sel-tag', 'sel-move', 'sel-delete']) $(id).disabled = !selected.size;
   $('sel-compare').disabled = selected.size !== 2;
   const all = selectedModels();
   $('sel-fav').textContent = all.length && all.every((m) => m.favorite) ? '☆ お気に入りから外す' : '★ お気に入りにする';
@@ -749,6 +867,16 @@ $('sel-fav').onclick = async () => {
   for (const m of all) await saveMeta(m, { favorite });
   render();
   toast(favorite ? `${all.length} 個をお気に入りにしました` : `${all.length} 個をお気に入りから外しました`);
+};
+$('sel-tag').onclick = async () => {
+  const known = [...new Set(models.flatMap((m) => m.tags))];
+  const text = prompt(`付けるタグ（カンマ区切りで複数）${known.length ? `\n今あるタグ: ${known.join(', ')}` : ''}`, '');
+  const add = (text || '').split(/[,、]/).map((v) => v.trim()).filter(Boolean);
+  if (!add.length) return;
+  const all = selectedModels();
+  for (const m of all) await saveMeta(m, { tags: [...m.tags, ...add] });
+  await load();
+  toast(`${all.length} 個に ${add.map((t) => '#' + t).join(' ')} を付けました`);
 };
 $('sel-move').onclick = async () => {
   const folders = [...new Set(models.map((m) => m.folder).filter(Boolean))];
@@ -781,6 +909,42 @@ $('sel-delete').onclick = async () => {
   await load();
   if (errors.length) toast(`${all.length - errors.length} 個削除、${errors.length} 個失敗: ${errors.join(' / ')}`, true, 10000);
   else toast(`${all.length} 個削除しました`);
+};
+
+// Duplicate check: the server groups model files with identical content.
+let dupGroups = [];
+const modelOf = (path) => models.find((m) => m.files.some((f) => f.path === path));
+$('dup-open').onclick = async () => {
+  $('dup-note').textContent = '確認中…';
+  $('dup-list').replaceChildren();
+  $('dup-select').disabled = true;
+  $('dlg-dup').showModal();
+  const res = await fetch('/__viewer/duplicates', { cache: 'no-store' }).then((r) => r.json());
+  dupGroups = res.groups;
+  $('dup-note').textContent = dupGroups.length
+    ? `中身がまったく同じファイルが ${dupGroups.length} 組あります。各組の 1 個目を残して、2 個目以降を選択モードで選べます。`
+    : '同じ中身のモデルファイルはありませんでした。';
+  $('dup-select').disabled = !dupGroups.length;
+  $('dup-list').replaceChildren(...dupGroups.flatMap((group, gi) => group.map((path, i) => {
+    const row = document.createElement('label');
+    row.innerHTML = '<span class="name"></span><span class="sub"></span>';
+    row.querySelector('.name').textContent = `${i ? '　└ ' : `${gi + 1}. `}${path}`;
+    row.querySelector('.sub').textContent = i ? '重複' : '残す';
+    row.style.cursor = 'pointer';
+    row.onclick = () => {
+      const k = shown.indexOf(modelOf(path));
+      if (k >= 0) { $('dlg-dup').close(); open(k); }
+    };
+    return row;
+  })));
+};
+$('dup-select').onclick = () => {
+  const extra = dupGroups.flatMap((g) => g.slice(1)).map(modelOf).filter(Boolean);
+  $('dlg-dup').close();
+  setSelecting(true);
+  for (const m of extra) selected.add(m.key);
+  render();
+  toast(`${extra.length} 個を選択しました。下のバーの「削除」でまとめて消せます`, false, 6000);
 };
 
 // Compare: two model-viewers side by side whose cameras follow each other.

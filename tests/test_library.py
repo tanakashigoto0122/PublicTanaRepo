@@ -47,6 +47,28 @@ def make_zip(path, members):
     return path
 
 
+def make_png(width, height):
+    """Just enough of a PNG for its size to be read: signature and IHDR."""
+    return (b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", width, height)
+            + b"\x08\x06\x00\x00\x00" + b"\x00" * 4)
+
+
+def textured_glb():
+    """A .glb with two embedded images: one base color, one normal map shared by two materials."""
+    color, normal = make_png(512, 256), make_png(64, 64)
+    gltf = {
+        "asset": {"version": "2.0"},
+        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(color)},
+                        {"buffer": 0, "byteOffset": len(color), "byteLength": len(normal)}],
+        "images": [{"bufferView": 0, "mimeType": "image/png", "name": "albedo"},
+                   {"bufferView": 1, "mimeType": "image/png"}],
+        "textures": [{"source": 0}, {"source": 1}],
+        "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}, "normalTexture": {"index": 1}},
+                      {"normalTexture": {"index": 1}}],
+    }
+    return make_glb(gltf, color + normal), color, normal
+
+
 class LibraryTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -249,6 +271,45 @@ class LibraryTests(unittest.TestCase):
                 library.move_model(self.root, ["cat.glb"], bad)
         self.assertTrue(os.path.exists(os.path.join(self.root, "cat.glb")))
 
+    def test_tags_are_cleaned_and_indexed(self):
+        touch(self.root, "cat.glb")
+        entry = library.set_meta(self.root, "cat.glb", tags=[" キャラ ", "キャラ", "", "Game", "game", "x" * 40])
+        self.assertEqual(entry["tags"], ["キャラ", "Game", "x" * 30])
+        [item] = viewer.build_index(self.root)
+        self.assertEqual(item["tags"], ["キャラ", "Game", "x" * 30])
+        library.set_meta(self.root, "cat.glb", tags=[])
+        self.assertEqual(library.read_meta(self.root), {})
+
+    def test_find_duplicates(self):
+        touch(self.root, "a.glb", b"same bytes")
+        touch(self.root, "studio/a copy.glb", b"same bytes")
+        touch(self.root, "b.glb", b"other byte")  # same size, different content
+        touch(self.root, "c.glb", b"unique")
+        touch(self.root, ".trash/a.glb", b"same bytes")
+        self.assertEqual(library.find_duplicates(self.root), [["a.glb", "studio/a copy.glb"]])
+
+    def test_textures_are_listed_read_and_exported(self):
+        glb, color, normal = textured_glb()
+        touch(self.root, "robot.glb", glb)
+        items = library.list_textures(self.root, "robot.glb")
+        self.assertEqual([(t["index"], t["uses"], t["width"], t["height"], t["bytes"]) for t in items],
+                         [(0, ["ベースカラー"], 512, 256, len(color)), (1, ["法線"], 64, 64, len(normal))])
+        self.assertEqual(library.read_texture(self.root, "robot.glb", 1), (normal, "image/png"))
+        folder = library.export_textures(self.root, "robot.glb")
+        self.assertEqual(folder, "textures/robot")
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, "textures", "robot"))),
+                         ["01_ベースカラー.png", "02_法線.png"])
+        touch(self.root, "plain.glb", make_glb(CUBE))
+        with self.assertRaises(ValueError):
+            library.export_textures(self.root, "plain.glb")
+
+    def test_image_size_reads_jpeg_and_webp(self):
+        jpeg = b"\xff\xd8" + b"\xff\xe0\x00\x04xx" + b"\xff\xc0\x00\x11\x08" + struct.pack(">HH", 300, 400) + b"\x00" * 8
+        self.assertEqual(library.image_size(jpeg), (400, 300))
+        vp8x = b"RIFF\x00\x00\x00\x00WEBPVP8X" + b"\x00" * 8 + (639).to_bytes(3, "little") + (479).to_bytes(3, "little")
+        self.assertEqual(library.image_size(vp8x), (640, 480))
+        self.assertIsNone(library.image_size(b"nothing"))
+
     def test_list_and_import_downloads(self):
         downloads = os.path.join(self._tmp.name, "Downloads")
         touch(downloads, "robot.glb", b"robot")
@@ -328,6 +389,19 @@ class ChangeEndpointTests(unittest.TestCase):
         touch(self.root, "cat.glb")
         status, res = self.call("POST", viewer.MOVE_PATH, json.dumps({"files": ["cat.glb"], "folder": "animals"}).encode())
         self.assertEqual((status, res), (200, {"moved": {"cat.glb": "animals/cat.glb"}}))
+
+    def test_texture_and_duplicate_endpoints(self):
+        glb, color, _ = textured_glb()
+        touch(self.root, "robot.glb", glb)
+        touch(self.root, "robot copy.glb", glb)
+        listed = json.load(urllib.request.urlopen(self.base + viewer.TEXTURES_PATH + "?model=robot.glb"))
+        self.assertEqual(len(listed["textures"]), 2)
+        with urllib.request.urlopen(self.base + viewer.TEXTURE_PATH + "?model=robot.glb&index=0") as res:
+            self.assertEqual((res.read(), res.headers["Content-Type"]), (color, "image/png"))
+        dups = json.load(urllib.request.urlopen(self.base + viewer.DUPLICATES_PATH))
+        self.assertEqual(dups["groups"], [["robot copy.glb", "robot.glb"]])
+        status, res = self.call("POST", viewer.EXPORT_TEXTURES_PATH, b'{"model": "robot.glb"}')
+        self.assertEqual((status, res), (200, {"folder": "textures/robot"}))
 
     def test_changes_need_token_and_local_host(self):
         self.assertEqual(self.call("PUT", viewer.UPLOAD_PATH + "?name=a.glb", b"x", token="wrong")[0], 403)

@@ -62,7 +62,13 @@ Key constraints of the Tripo API that shape the design:
   `.tripo-viewer.json` in the folder and keyed by the model's main file (`key` in the index;
   `library` moves the keys on rename and drops them on delete). `GET /__viewer/stats?model=` reads
   triangle/vertex/material/texture counts from the glTF JSON (`library.glb_stats`; for a .glb only
-  the header and JSON chunk are read). Each index entry also has `folder` for the folder filter.
+  the header and JSON chunk are read). Each index entry also has `folder` for the folder filter
+  and `tags` (stored in the same meta file, cleaned by `library.clean_tags`).
+  `GET /__viewer/duplicates` groups model files with identical content (`library.find_duplicates`:
+  only same-size files are hashed, hashes cached by path/size/mtime). `GET /__viewer/textures?model=`
+  lists a model's images with their uses and pixel size (`library.image_size` reads PNG/JPEG/WebP
+  headers), `GET /__viewer/texture?model=&index=` serves one, and `POST /__viewer/textures/export`
+  writes them to `textures/<model>/`.
   `POST /__viewer/move` moves one model's files into a subfolder (`library.move_model`, which
   updates the manifest and meta). The page has a selection mode (the "選択" button or Ctrl+click)
   for favoriting, moving, deleting, and comparing two models side by side with synced cameras.

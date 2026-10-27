@@ -4,6 +4,8 @@ The viewer server and the desktop app call these. Every path the page sends is r
 folder and is checked to stay inside it.
 """
 
+import base64
+import hashlib
 import io
 import json
 import os
@@ -152,7 +154,7 @@ def _write_json(path: str, data: Any) -> None:
 
 
 def read_meta(root: str) -> Dict[str, Dict[str, Any]]:
-    """``{main file: {"favorite": bool, "memo": str}}``; empty when there is no or a broken file."""
+    """``{main file: {"favorite": bool, "memo": str, "tags": [str]}}``; empty when there is no or a broken file."""
     try:
         with open(os.path.join(root, META_NAME), encoding="utf-8") as handle:
             data = json.load(handle).get("models")
@@ -165,8 +167,23 @@ def _save_meta(root: str, meta: Dict[str, Dict[str, Any]]) -> None:
     _write_json(os.path.join(root, META_NAME), {"models": {k: v for k, v in meta.items() if v}})
 
 
-def set_meta(root: str, key: str, favorite: Optional[bool] = None, memo: Optional[str] = None) -> Dict[str, Any]:
-    """Set the favorite flag and/or memo of the model whose main file is ``key``."""
+MAX_TAG_LENGTH = 30
+
+
+def clean_tags(tags: Any) -> List[str]:
+    """Tags stripped, without empties or repeats (case-insensitive), each at most 30 characters."""
+    seen, result = set(), []
+    for tag in tags if isinstance(tags, list) else []:
+        tag = str(tag).strip()[:MAX_TAG_LENGTH]
+        if tag and tag.lower() not in seen:
+            seen.add(tag.lower())
+            result.append(tag)
+    return result
+
+
+def set_meta(root: str, key: str, favorite: Optional[bool] = None, memo: Optional[str] = None,
+             tags: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Set the favorite flag, memo and/or tags of the model whose main file is ``key``."""
     if not os.path.isfile(safe_path(root, key)):
         raise ValueError(f"モデルが見つかりません: {key}")
     meta = read_meta(root)
@@ -175,6 +192,8 @@ def set_meta(root: str, key: str, favorite: Optional[bool] = None, memo: Optiona
         entry["favorite"] = bool(favorite)
     if memo is not None:
         entry["memo"] = str(memo).strip()
+    if tags is not None:
+        entry["tags"] = clean_tags(tags)
     entry = {k: v for k, v in entry.items() if v}
     meta[key] = entry
     _save_meta(root, meta)
@@ -498,3 +517,158 @@ def save_screenshot(root: str, name: str, stream: BinaryIO, length: int) -> str:
     path = unique_path(os.path.join(folder, f"{name}_{datetime.now():%Y%m%d-%H%M%S}.png"))
     _write(path, io.BytesIO(data), length)
     return _rel(root, path)
+
+
+# (path, size, mtime) -> SHA-1, so repeated checks only hash files that changed.
+_hash_cache: Dict[Tuple[str, int, float], str] = {}
+
+
+def _file_hash(path: str, size: int, mtime: float) -> str:
+    key = (path, size, mtime)
+    if key not in _hash_cache:
+        digest = hashlib.sha1()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(_COPY_CHUNK), b""):
+                digest.update(chunk)
+        _hash_cache[key] = digest.hexdigest()
+    return _hash_cache[key]
+
+
+def find_duplicates(root: str) -> List[List[str]]:
+    """Groups of model files under ``root`` with identical content, largest files first.
+
+    Only files sharing a size are hashed, so this stays quick on big folders.
+    """
+    by_size: Dict[int, List[Tuple[str, float]]] = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for name in filenames:
+            if is_model_file(name) and not name.startswith("."):
+                path = os.path.join(dirpath, name)
+                stat = os.stat(path)
+                by_size.setdefault(stat.st_size, []).append((path, stat.st_mtime))
+    groups = []
+    for size in sorted(by_size, reverse=True):
+        if len(by_size[size]) < 2:
+            continue
+        by_hash: Dict[str, List[str]] = {}
+        for path, mtime in by_size[size]:
+            by_hash.setdefault(_file_hash(path, size, mtime), []).append(_rel(root, path))
+        groups.extend(sorted(paths) for paths in by_hash.values() if len(paths) > 1)
+    return groups
+
+
+_TEXTURE_USES = (("baseColorTexture", "ベースカラー"), ("metallicRoughnessTexture", "金属・粗さ"),
+                 ("normalTexture", "法線"), ("occlusionTexture", "AO（陰影）"), ("emissiveTexture", "発光"))
+_MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/ktx2": ".ktx2"}
+TEXTURE_DIR = "textures"
+
+
+def _glb_bin_offset(path: str) -> int:
+    """File offset where a .glb's BIN chunk data starts."""
+    with open(path, "rb") as handle:
+        _magic, _version, _length, json_length, _type = struct.unpack("<5I", handle.read(20))
+    return 20 + json_length + 8
+
+
+def image_size(data: bytes) -> Optional[Tuple[int, int]]:
+    """Width and height from a PNG, JPEG or WebP header, or None."""
+    if data.startswith(_PNG_MAGIC) and len(data) >= 24:
+        width, height = struct.unpack(">II", data[16:24])
+        return width, height
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) >= 30:
+        kind = data[12:16]
+        if kind == b"VP8 ":
+            width, height = struct.unpack("<HH", data[26:30])
+            return width & 0x3FFF, height & 0x3FFF
+        if kind == b"VP8L":
+            bits = int.from_bytes(data[21:25], "little")
+            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        if kind == b"VP8X":
+            return int.from_bytes(data[24:27], "little") + 1, int.from_bytes(data[27:30], "little") + 1
+    if data[:2] == b"\xff\xd8":
+        i = 2
+        while i + 9 < len(data):
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                height, width = struct.unpack(">HH", data[i + 5:i + 9])
+                return width, height
+            i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
+    return None
+
+
+def _image_bytes(root: str, model: str, gltf: Dict[str, Any], index: int) -> Tuple[bytes, str]:
+    path = safe_path(root, model)
+    images = gltf.get("images") or []
+    if not 0 <= index < len(images):
+        raise ValueError("その番号の画像はありません")
+    image = images[index]
+    mime = image.get("mimeType") or ""
+    if "bufferView" in image:
+        view = gltf["bufferViews"][image["bufferView"]]
+        if not path.lower().endswith(".glb"):
+            raise ValueError("glTF の外部バッファの画像には対応していません")
+        with open(path, "rb") as handle:
+            handle.seek(_glb_bin_offset(path) + view.get("byteOffset", 0))
+            return handle.read(view["byteLength"]), mime
+    uri = image.get("uri") or ""
+    if uri.startswith("data:"):
+        header, _, payload = uri.partition(",")
+        return base64.b64decode(payload), header[5:].split(";")[0]
+    folder = os.path.dirname(model)
+    with open(safe_path(root, f"{folder}/{uri}" if folder else uri), "rb") as handle:
+        data = handle.read()
+    ext = os.path.splitext(uri)[1].lower()
+    return data, mime or next((m for m, e in _MIME_EXT.items() if e == ext), "")
+
+
+def list_textures(root: str, model: str) -> List[Dict[str, Any]]:
+    """The images of a .glb/.gltf: format, size in bytes and pixels, and what each is used for."""
+    path = safe_path(root, model)
+    if os.path.splitext(path)[1].lower() not in VIEWABLE:
+        raise ValueError("GLB / glTF だけ対応しています")
+    gltf = _gltf_json(path)
+    uses: Dict[int, List[str]] = {}
+    textures = gltf.get("textures") or []
+    for material in gltf.get("materials") or []:
+        slots = dict(material.get("pbrMetallicRoughness") or {}, **material)
+        for slot, label in _TEXTURE_USES:
+            ref = slots.get(slot)
+            if isinstance(ref, dict) and 0 <= ref.get("index", -1) < len(textures):
+                source = textures[ref["index"]].get("source")
+                if source is not None and label not in uses.setdefault(source, []):
+                    uses[source].append(label)
+    result = []
+    for index, image in enumerate(gltf.get("images") or []):
+        try:
+            data, mime = _image_bytes(root, model, gltf, index)
+        except (ValueError, OSError, KeyError, IndexError):
+            data, mime = b"", image.get("mimeType") or ""
+        size = image_size(data)
+        result.append({"index": index, "name": image.get("name") or "", "mime": mime, "bytes": len(data),
+                       "width": size[0] if size else None, "height": size[1] if size else None,
+                       "uses": uses.get(index, [])})
+    return result
+
+
+def read_texture(root: str, model: str, index: int) -> Tuple[bytes, str]:
+    return _image_bytes(root, model, _gltf_json(safe_path(root, model)), index)
+
+
+def export_textures(root: str, model: str) -> str:
+    """Write a model's images to ``textures/<model name>/`` in ``root``; returns that folder."""
+    stem = os.path.splitext(os.path.basename(model))[0]
+    items = list_textures(root, model)
+    if not items:
+        raise ValueError("このモデルには画像（テクスチャ）がありません")
+    folder = unique_path(safe_path(root, f"{TEXTURE_DIR}/{check_name(stem)}"))
+    os.makedirs(folder)
+    for item in items:
+        data, mime = read_texture(root, model, item["index"])
+        name = _BAD_NAME.sub("_", f"{item['index'] + 1:02d}_{'_'.join(item['uses']) or '未使用'}")
+        with open(os.path.join(folder, name + _MIME_EXT.get(mime, ".bin")), "wb") as handle:
+            handle.write(data)
+    return _rel(root, folder)

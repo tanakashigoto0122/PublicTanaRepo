@@ -31,6 +31,10 @@ THUMBNAIL_PATH = "/__viewer/thumbnail"
 SCREENSHOT_PATH = "/__viewer/screenshot"
 META_PATH = "/__viewer/meta"
 STATS_PATH = "/__viewer/stats"
+DUPLICATES_PATH = "/__viewer/duplicates"
+TEXTURES_PATH = "/__viewer/textures"
+TEXTURE_PATH = "/__viewer/texture"
+EXPORT_TEXTURES_PATH = "/__viewer/textures/export"
 RENAME_PATH = "/__viewer/rename"
 DELETE_PATH = "/__viewer/delete"
 MOVE_PATH = "/__viewer/move"
@@ -114,6 +118,7 @@ def build_index(root: str) -> List[Dict[str, Any]]:
         item["folder"] = key.rpartition("/")[0]
         item["favorite"] = bool((meta.get(key) or {}).get("favorite"))
         item["memo"] = (meta.get(key) or {}).get("memo") or ""
+        item["tags"] = library.clean_tags((meta.get(key) or {}).get("tags"))
         result.append(item)
     result.sort(key=lambda m: m["created"] or m["modified"], reverse=True)
     return result
@@ -136,12 +141,23 @@ class _Handler(SimpleHTTPRequestHandler):
             self._send(body, "application/json; charset=utf-8")
         elif path == MODEL_VIEWER_PATH:
             self._send(_asset("vendor/model-viewer.min.js"), "text/javascript; charset=utf-8", cache=True)
-        elif path == STATS_PATH:
-            model = (parse_qs(urlsplit(self.path).query).get("model") or [""])[0]
+        elif path == DUPLICATES_PATH:
+            body = json.dumps({"groups": library.find_duplicates(self.directory)}, ensure_ascii=False).encode("utf-8")
+            self._send(body, "application/json; charset=utf-8")
+        elif path in (STATS_PATH, TEXTURES_PATH, TEXTURE_PATH):
+            query = parse_qs(urlsplit(self.path).query)
+            model = (query.get("model") or [""])[0]
             try:
-                result, status = library.glb_stats(self.directory, model), 200
-            except (ValueError, OSError) as exc:
-                result, status = {"error": str(exc)}, 400
+                if path == TEXTURE_PATH:
+                    data, mime = library.read_texture(self.directory, model, int((query.get("index") or ["-1"])[0]))
+                    self._send(data, mime or "application/octet-stream")
+                    return
+                if path == TEXTURES_PATH:
+                    result, status = {"textures": library.list_textures(self.directory, model)}, 200
+                else:
+                    result, status = library.glb_stats(self.directory, model), 200
+            except (ValueError, OSError, KeyError, IndexError) as exc:
+                result, status = {"error": str(exc) or type(exc).__name__}, 400
             self._send(json.dumps(result, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8",
                        status=status)
         else:
@@ -176,11 +192,13 @@ class _Handler(SimpleHTTPRequestHandler):
                 return {"renamed": library.rename_model(self.directory, files, str(body.get("name") or ""))}
             if path == DELETE_PATH:
                 return {"moved_to": library.delete_model(self.directory, files)}
+            if path == EXPORT_TEXTURES_PATH:
+                return {"folder": library.export_textures(self.directory, str(body.get("model") or ""))}
             if path == MOVE_PATH:
                 return {"moved": library.move_model(self.directory, files, str(body.get("folder") or ""))}
             if path == META_PATH:
                 return library.set_meta(self.directory, str(body.get("key") or ""),
-                                        favorite=body.get("favorite"), memo=body.get("memo"))
+                                        favorite=body.get("favorite"), memo=body.get("memo"), tags=body.get("tags"))
             raise LookupError(path)
 
         self._change(change)
