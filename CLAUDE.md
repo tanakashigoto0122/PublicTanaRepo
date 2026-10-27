@@ -76,7 +76,13 @@ Key constraints of the Tripo API that shape the design:
   checks every member stays inside before writing anything). Background, lighting, exposure, light direction and gloss of the 3D view are
   kept in localStorage. model-viewer cannot rotate its environment, so "light direction" turns the
   model (`orientation` yaw) and the camera (`theta`) by the same angle. Gloss scales each material's
-  `roughnessFactor` (display only; files are not changed). The page re-reads the index every 3 s and re-renders when it changed, unless a
+  `roughnessFactor` and "metal" its `metallicFactor` (display only; files are not changed).
+  A background can be an image stored in `.backgrounds/` (`PUT /__viewer/background`,
+  `GET /__viewer/backgrounds`), used as both `skybox-image` and `environment-image`.
+  "Dimension lines" are model-viewer hotspots on bounding-box edges plus an SVG overlay redrawn on
+  `camera-change`. "Turntable video" records the shown shadow canvas (`canvas.show`; model-viewer
+  keeps two) composited onto a 2D canvas via `MediaRecorder`, uploaded with `PUT /__viewer/video`.
+  In model-viewer 4, `auto-rotate` turns the model (`turntableRotation`), not the camera. The page re-reads the index every 3 s and re-renders when it changed, unless a
   dialog is open, so files added in Explorer show up on their own.
 - `src/tripo_export/library.py`: the file operations behind those endpoints and the app's
   "import from Downloads". Paths from the page go through `safe_path`. Renaming keeps the

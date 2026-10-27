@@ -72,6 +72,10 @@
   .texgrid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; border: 1px solid var(--border);
                  background: repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 12px 12px; cursor: zoom-in; }
   #d-texbox summary { font-size: 13px; cursor: pointer; }
+  .dim { font-size: 12px; font-weight: 650; color: #fff; background: rgba(20, 40, 120, .85); border-radius: 6px;
+         padding: 2px 7px; white-space: nowrap; pointer-events: none; border: none; transform: translateY(-50%); }
+  .dimlines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  .dimlines line { stroke: rgba(20, 40, 120, .85); stroke-width: 2; stroke-dasharray: 5 4; }
   #d-memo { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--border);
             border-radius: 8px; padding: 8px 10px; min-height: 60px; resize: vertical; width: 100%; }
   .badge { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 650; letter-spacing: .04em;
@@ -239,13 +243,17 @@
         <label>背景 <select id="c-bg">
           <option value="">標準</option><option value="#ffffff">白</option><option value="#7a7a76">グレー</option>
           <option value="#111111">黒</option><option value="#00b140">グリーン</option>
+          <option value="pick">画像を選ぶ…</option>
         </select></label>
+        <input type="file" id="c-bgfile" accept=".png,.jpg,.jpeg,.webp,.hdr" hidden>
         <label>ライト <select id="c-light">
           <option value="neutral">ニュートラル</option><option value="legacy">スタジオ</option><option value="flat">影なし</option>
         </select></label>
         <label>明るさ <input type="range" id="c-exposure" min="0.3" max="2.5" step="0.1" value="1"></label>
         <label title="光が当たる方向を回します">光の向き <input type="range" id="c-lightdir" min="0" max="355" step="5" value="0"></label>
         <label title="左でザラザラ、右でツルツル（表示だけで、ファイルは変わりません）">ツヤ <input type="range" id="c-gloss" min="-100" max="100" step="5" value="0"></label>
+        <label title="左で金属っぽさを消す（完全なツヤ消し向け）、右で金属っぽく">金属感 <input type="range" id="c-metal" min="-100" max="100" step="5" value="0"></label>
+        <label><input type="checkbox" id="c-dims"> 寸法線</label>
         <button class="btn" id="c-reset" title="背景・ライト・明るさ・光の向き・ツヤを最初に戻します">戻す</button>
       </div>
       <div class="files" id="d-files"></div>
@@ -256,6 +264,7 @@
       <div class="edit">
         <button class="btn" id="d-thumb" title="今の表示をこのモデルのサムネイル画像として保存します">この角度をサムネイルに</button>
         <button class="btn" id="d-shot" title="今の表示を PNG で screenshots フォルダに保存します">画像として保存</button>
+        <button class="btn" id="d-video" title="モデルが一周する動画（WebM）を screenshots フォルダに保存します">一周動画を保存</button>
         <button class="btn" id="d-rename">名前を変更</button><button class="btn danger" id="d-delete">削除</button>
       </div>
       <div class="hint">ドラッグで回転・ホイールで拡大・右ドラッグで移動・← → で前後のモデル・Esc で閉じる。GLB などのファイルは一覧にドラッグ＆ドロップで追加できます</div>
@@ -642,6 +651,7 @@ function showFavorite(m) {
 function showLoaded(mv) {
   if (!mv.isConnected) return;
   applyGloss(mv);
+  drawDims(mv);
   const { x, y, z } = mv.getDimensions();
   const fmt = (v) => (v >= 1 ? v.toFixed(2) + ' m' : (v * 100).toFixed(1) + ' cm');
   addInfo('大きさ', `幅 ${fmt(x)} × 高さ ${fmt(y)} × 奥行 ${fmt(z)}`);
@@ -681,14 +691,20 @@ $('c-rotate').onchange = (e) => $('stage').querySelector('model-viewer')?.toggle
 // Background and lighting of the 3D view, remembered across sessions.
 const LIGHTS = { neutral: ['neutral', '0.8'], legacy: ['legacy', '1'], flat: ['neutral', '0'] };
 function applyLook(mv = $('stage').querySelector('model-viewer')) {
-  $('stage').style.background = $('c-bg').value;
+  // A background value is either a color or "img:<path>" of an image kept in .backgrounds/,
+  // which then also lights the model.
+  const bg = $('c-bg').value;
+  const image = bg.startsWith('img:') ? url(bg.slice(4)) : null;
+  $('stage').style.background = image ? '' : bg;
   if (!mv) return;
   const [env, shadow] = LIGHTS[$('c-light').value] || LIGHTS.neutral;
-  mv.setAttribute('environment-image', env);
+  mv.setAttribute('environment-image', image || env);
+  if (image) mv.setAttribute('skybox-image', image); else mv.removeAttribute('skybox-image');
   mv.setAttribute('shadow-intensity', shadow);
   mv.setAttribute('exposure', $('c-exposure').value);
   applyLightDir(mv);
   applyGloss(mv);
+  if (mv.closest('#stage')) drawDims(mv);
 }
 
 // model-viewer cannot rotate its environment, so the model is turned instead and the camera
@@ -710,28 +726,134 @@ function applyLightDir(mv) {
 
 // Gloss scales each material's roughness factor (which multiplies its roughness texture):
 // right of center towards 0 (smooth), left towards 1 (rough). The original factors are kept.
-const baseRoughness = new WeakMap();
+// Metallic works the same way on the metallic factor: left towards 0 (fully matte with gloss
+// all the way left), right towards 1.
+const baseRoughness = new WeakMap(), baseMetallic = new WeakMap();
 function applyGloss(mv) {
   if (!mv.model) return;
-  const g = Number($('c-gloss').value) / 100;
+  const g = Number($('c-gloss').value) / 100, k = Number($('c-metal').value) / 100;
+  const shift = (v0, t) => (t >= 0 ? v0 + (1 - v0) * t : v0 * (1 + t));
   for (const material of mv.model.materials) {
     const pbr = material.pbrMetallicRoughness;
     if (!baseRoughness.has(material)) baseRoughness.set(material, pbr.roughnessFactor);
-    const r0 = baseRoughness.get(material);
-    pbr.setRoughnessFactor(g >= 0 ? r0 * (1 - g) : r0 + (1 - r0) * -g);
+    if (!baseMetallic.has(material)) baseMetallic.set(material, pbr.metallicFactor);
+    pbr.setRoughnessFactor(shift(baseRoughness.get(material), -g));
+    pbr.setMetallicFactor(shift(baseMetallic.get(material), k));
   }
 }
-const LOOK_IDS = ['c-bg', 'c-light', 'c-exposure', 'c-lightdir', 'c-gloss'];
+
+// Dimension lines: labels are model-viewer hotspots at the middle of three bounding-box edges,
+// and the dashed lines between the corners are redrawn whenever the camera moves.
+const DIM_EDGES = {
+  x: [[-1, -1, 1], [1, -1, 1]],   // width: bottom front edge
+  y: [[1, -1, 1], [1, 1, 1]],     // height: right front edge
+  z: [[1, -1, -1], [1, -1, 1]],   // depth: bottom right edge
+};
+function drawDims(mv) {
+  const stage = $('stage');
+  mv.querySelectorAll('.dim').forEach((el) => el.remove());
+  stage.querySelector('.dimlines')?.remove();
+  if (!$('c-dims').checked || !mv.loaded) return;
+  const c = mv.getBoundingBoxCenter(), size = mv.getDimensions();
+  const fmt = (v) => (v >= 1 ? v.toFixed(2) + ' m' : (v * 100).toFixed(1) + ' cm');
+  const point = (sx, sy, sz) => `${c.x + sx * size.x / 2}m ${c.y + sy * size.y / 2}m ${c.z + sz * size.z / 2}m`;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.classList.add('dimlines');
+  const lines = {};
+  for (const [axis, [a, b]] of Object.entries(DIM_EDGES)) {
+    for (const [end, p] of [['a', a], ['b', b]]) {
+      const dot = document.createElement('div');
+      dot.className = 'dim';
+      dot.slot = `hotspot-dim-${axis}${end}`;
+      dot.dataset.position = point(...p);
+      dot.style.visibility = 'hidden';
+      mv.append(dot);
+    }
+    const label = document.createElement('div');
+    label.className = 'dim';
+    label.slot = `hotspot-dim-${axis}`;
+    label.dataset.position = point(...a.map((v, i) => (v + b[i]) / 2));
+    label.textContent = fmt(size[axis]);
+    mv.append(label);
+    lines[axis] = svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'line'));
+  }
+  stage.append(svg);
+  const update = () => {
+    if (!svg.isConnected) return mv.removeEventListener('camera-change', update);
+    const box = stage.getBoundingClientRect(), own = mv.getBoundingClientRect();
+    for (const axis of Object.keys(DIM_EDGES)) {
+      const [pa, pb] = ['a', 'b'].map((e) => mv.queryHotspot(`hotspot-dim-${axis}${e}`)?.canvasPosition);
+      if (!pa || !pb) continue;
+      const dx = own.left - box.left, dy = own.top - box.top;
+      lines[axis].setAttribute('x1', pa.x + dx); lines[axis].setAttribute('y1', pa.y + dy);
+      lines[axis].setAttribute('x2', pb.x + dx); lines[axis].setAttribute('y2', pb.y + dy);
+    }
+  };
+  mv.addEventListener('camera-change', update);
+  requestAnimationFrame(update);
+}
+
+const LOOK_IDS = ['c-bg', 'c-light', 'c-exposure', 'c-lightdir', 'c-gloss', 'c-metal', 'c-dims'];
+const lookValue = (id) => ($(id).type === 'checkbox' ? String($(id).checked) : $(id).value);
+function setLook(id, value) {
+  if ($(id).type === 'checkbox') $(id).checked = value === 'true';
+  else $(id).value = value;
+}
 $('c-reset').onclick = () => {
-  for (const id of LOOK_IDS) { $(id).value = $(id).tagName === 'SELECT' ? $(id).options[0].value : $(id).defaultValue; store.set(`tripo-viewer-${id}`, $(id).value); }
+  for (const id of LOOK_IDS) {
+    if ($(id).type === 'checkbox') $(id).checked = false;
+    else $(id).value = $(id).tagName === 'SELECT' ? $(id).options[0].value : $(id).defaultValue;
+    store.set(`tripo-viewer-${id}`, lookValue(id));
+  }
   applyLook();
 };
-for (const id of LOOK_IDS) {
-  const saved = store.get(`tripo-viewer-${id}`);
-  const valid = $(id).options ? [...$(id).options].some((o) => o.value === saved) : saved !== null;
-  if (valid) $(id).value = saved;
-  $(id).oninput = () => { store.set(`tripo-viewer-${id}`, $(id).value); applyLook(); };
+function restoreLook() {
+  for (const id of LOOK_IDS) {
+    const saved = store.get(`tripo-viewer-${id}`);
+    const valid = $(id).options ? [...$(id).options].some((o) => o.value === saved) : saved !== null;
+    if (valid) setLook(id, saved);
+  }
 }
+restoreLook();
+for (const id of LOOK_IDS) {
+  $(id).oninput = () => {
+    if (id === 'c-bg' && $(id).value === 'pick') return pickBackground();
+    store.set(`tripo-viewer-${id}`, lookValue(id));
+    applyLook();
+  };
+  if ($(id).type === 'checkbox') $(id).onchange = $(id).oninput;
+}
+
+// Background images live in the folder's .backgrounds/, so they come back on the next start.
+async function loadBackgrounds() {
+  try {
+    const res = await fetch('/__viewer/backgrounds', { cache: 'no-store' }).then((r) => r.json());
+    $('c-bg').querySelectorAll('option[value^="img:"]').forEach((o) => o.remove());
+    const pick = $('c-bg').querySelector('option[value="pick"]');
+    for (const path of res.backgrounds) pick.before(new Option(`🖼 ${path.split('/').pop()}`, `img:${path}`));
+    restoreLook();
+    applyLook();
+  } catch { /* colors still work */ }
+}
+let lastBg = $('c-bg').value === 'pick' ? '' : $('c-bg').value;
+function pickBackground() {
+  $('c-bg').value = lastBg;
+  $('c-bgfile').value = '';
+  $('c-bgfile').click();
+}
+$('c-bg').addEventListener('input', () => { if ($('c-bg').value !== 'pick') lastBg = $('c-bg').value; });
+$('c-bgfile').onchange = async () => {
+  const file = $('c-bgfile').files[0];
+  if (!file) return;
+  try {
+    const res = await change(`/__viewer/background?name=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file });
+    store.set('tripo-viewer-c-bg', `img:${res.path}`);
+    await loadBackgrounds();
+    lastBg = $('c-bg').value;
+    toast('背景に設定しました');
+  } catch (err) { toast(`背景にできませんでした: ${err.message}`, true); }
+};
+loadBackgrounds();
 
 // ---- Changing the folder: add (drag & drop), rename, delete ---------------------------------
 const token = document.querySelector('meta[name=viewer-token]').content;
@@ -990,6 +1112,61 @@ $('sel-compare').onclick = () => {
 $('cmp-rotate').onchange = () => $('cmp').querySelectorAll('model-viewer').forEach((mv) => mv.toggleAttribute('auto-rotate', $('cmp-rotate').checked));
 $('cmp-close').onclick = () => $('dlg-compare').close();
 $('dlg-compare').addEventListener('close', () => $('cmp').replaceChildren());
+// One full turn recorded from the model-viewer canvas, composited over the stage background
+// (the canvas itself is transparent) into a WebM.
+const TURN_SECONDS = 8;
+$('d-video').onclick = async () => {
+  const m = shown[current];
+  const mv = $('stage').querySelector('model-viewer');
+  if (!mv?.loaded) return toast('モデルの読み込みが終わってから押してください', true);
+  // model-viewer keeps two canvases and shows one (class 'show'); read whichever is shown.
+  const shownCanvas = () => mv.shadowRoot?.querySelector('canvas.show') || mv.shadowRoot?.querySelector('canvas');
+  const source = shownCanvas();
+  if (!source || !window.MediaRecorder) return toast('この環境では動画を録画できません', true);
+  const out = document.createElement('canvas');
+  out.width = source.width - (source.width % 2);
+  out.height = source.height - (source.height % 2);
+  const ctx = out.getContext('2d');
+  const bg = $('c-bg').value;
+  const fill = bg && !bg.startsWith('img:') ? bg : getComputedStyle(document.body).getPropertyValue('--surface-2') || '#eeeeea';
+  const type = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t));
+  const recorder = new MediaRecorder(out.captureStream(30), { mimeType: type, videoBitsPerSecond: 6_000_000 });
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const rotate = [mv.hasAttribute('auto-rotate'), mv.getAttribute('rotation-per-second'), mv.getAttribute('auto-rotate-delay')];
+  mv.setAttribute('rotation-per-second', `${360 / TURN_SECONDS}deg`);
+  mv.setAttribute('auto-rotate-delay', '0');
+  mv.setAttribute('auto-rotate', '');
+  $('d-video').disabled = true;
+  let drawing = true;
+  const draw = () => {
+    if (!drawing) return;
+    ctx.fillStyle = fill.trim() || '#eeeeea';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(shownCanvas(), 0, 0, out.width, out.height);
+    requestAnimationFrame(draw);
+  };
+  draw();
+  recorder.start(500);
+  for (let left = TURN_SECONDS; left > 0; left--) {
+    toast(`一周動画を録画中… あと ${left} 秒`, false, 0);
+    await sleep(1000);
+  }
+  await new Promise((resolve) => { recorder.onstop = resolve; recorder.stop(); });
+  drawing = false;
+  mv.toggleAttribute('auto-rotate', rotate[0]);
+  for (const [name, value] of [['rotation-per-second', rotate[1]], ['auto-rotate-delay', rotate[2]]]) {
+    if (value === null) mv.removeAttribute(name); else mv.setAttribute(name, value);
+  }
+  $('d-video').disabled = false;
+  let res;
+  try {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    res = await change(`/__viewer/video?name=${encodeURIComponent(label(m))}`, { method: 'PUT', body: blob });
+  } catch (err) { return toast(`動画を保存できませんでした: ${err.message}`, true); }
+  toast(`保存しました: ${res.path}`);
+  if (appState) api().reveal(res.path);
+};
 $('d-shot').onclick = async () => {
   const m = shown[current];
   const mv = $('stage').querySelector('model-viewer');

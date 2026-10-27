@@ -310,6 +310,25 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(library.image_size(vp8x), (640, 480))
         self.assertIsNone(library.image_size(b"nothing"))
 
+    def test_save_video(self):
+        webm = b"\x1a\x45\xdf\xa3" + b"rest of the file"
+        rel = library.save_video(self.root, "猫", io.BytesIO(webm), len(webm))
+        self.assertRegex(rel, r"^screenshots/猫_\d{8}-\d{6}\.webm$")
+        with open(os.path.join(self.root, *rel.split("/")), "rb") as handle:
+            self.assertEqual(handle.read(), webm)
+        with self.assertRaises(ValueError):
+            library.save_video(self.root, "x", io.BytesIO(b"not a video file"), 16)
+
+    def test_backgrounds_are_stored_hidden_from_the_index(self):
+        touch(self.root, "cat.glb")
+        rel = library.save_background(self.root, "C:\\pics\\sky.hdr", io.BytesIO(b"#?RADIANCE"), 10)
+        self.assertEqual(rel, ".backgrounds/sky.hdr")
+        library.save_background(self.root, "sky.hdr", io.BytesIO(b"#?RADIANCE"), 10)
+        self.assertEqual(library.list_backgrounds(self.root), [".backgrounds/sky (2).hdr", ".backgrounds/sky.hdr"])
+        with self.assertRaises(ValueError):
+            library.save_background(self.root, "notes.txt", io.BytesIO(b"x"), 1)
+        self.assertEqual([i["key"] for i in viewer.build_index(self.root)], ["cat.glb"])
+
     def test_list_and_import_downloads(self):
         downloads = os.path.join(self._tmp.name, "Downloads")
         touch(downloads, "robot.glb", b"robot")
@@ -402,6 +421,16 @@ class ChangeEndpointTests(unittest.TestCase):
         self.assertEqual(dups["groups"], [["robot copy.glb", "robot.glb"]])
         status, res = self.call("POST", viewer.EXPORT_TEXTURES_PATH, b'{"model": "robot.glb"}')
         self.assertEqual((status, res), (200, {"folder": "textures/robot"}))
+
+    def test_video_and_background_endpoints(self):
+        status, res = self.call("PUT", viewer.BACKGROUND_PATH + "?name=sky.png", b"\x89PNG....")
+        self.assertEqual((status, res), (200, {"path": ".backgrounds/sky.png"}))
+        listed = json.load(urllib.request.urlopen(self.base + viewer.BACKGROUNDS_PATH))
+        self.assertEqual(listed, {"backgrounds": [".backgrounds/sky.png"]})
+        status, res = self.call("PUT", viewer.VIDEO_PATH + "?name=turn", b"\x1a\x45\xdf\xa3video")
+        self.assertEqual(status, 200)
+        self.assertTrue(res["path"].endswith(".webm"))
+        self.assertEqual(self.call("PUT", viewer.VIDEO_PATH + "?name=x", b"\x1a\x45\xdf\xa3video", token="no")[0], 403)
 
     def test_changes_need_token_and_local_host(self):
         self.assertEqual(self.call("PUT", viewer.UPLOAD_PATH + "?name=a.glb", b"x", token="wrong")[0], 403)

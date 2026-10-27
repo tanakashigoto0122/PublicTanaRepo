@@ -672,3 +672,68 @@ def export_textures(root: str, model: str) -> str:
         with open(os.path.join(folder, name + _MIME_EXT.get(mime, ".bin")), "wb") as handle:
             handle.write(data)
     return _rel(root, folder)
+
+
+MAX_VIDEO_BYTES = 500 * 1024 * 1024
+_WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
+
+
+def save_video(root: str, name: str, stream: BinaryIO, length: int) -> str:
+    """Save a WebM as ``screenshots/<name>_<date-time>.webm`` in ``root``; returns its relative path."""
+    if not len(_WEBM_MAGIC) < length <= MAX_VIDEO_BYTES:
+        raise ValueError("動画が空か、大きすぎます")
+    head = stream.read(len(_WEBM_MAGIC))
+    if head != _WEBM_MAGIC:
+        raise ValueError("WebM 動画ではありません")
+    try:
+        name = check_name(name)
+    except ValueError:
+        name = "turntable"
+    folder = safe_path(root, SCREENSHOT_DIR)
+    os.makedirs(folder, exist_ok=True)
+    path = unique_path(os.path.join(folder, f"{name}_{datetime.now():%Y%m%d-%H%M%S}.webm"))
+    _write(path, _Prefixed(head, stream), length)
+    return _rel(root, path)
+
+
+class _Prefixed:
+    """A stream that first returns bytes already read from it (here, the checked signature)."""
+
+    def __init__(self, head: bytes, stream: BinaryIO):
+        self.head, self.stream = head, stream
+
+    def read(self, size: int) -> bytes:
+        if self.head:
+            chunk, self.head = self.head[:size], self.head[size:]
+            return chunk
+        return self.stream.read(size)
+
+
+# Background images for the 3D view, kept in a dot folder so the model index skips them.
+BACKGROUND_DIR = ".backgrounds"
+BACKGROUND_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".hdr")
+MAX_BACKGROUND_BYTES = 100 * 1024 * 1024
+
+
+def save_background(root: str, name: str, stream: BinaryIO, length: int) -> str:
+    """Store an image (PNG/JPEG/WebP, or a .hdr environment) for use as a background."""
+    name = check_name(os.path.basename(name.replace("\\", "/")))
+    if os.path.splitext(name)[1].lower() not in BACKGROUND_EXTENSIONS:
+        raise ValueError("背景に使えるのは PNG / JPEG / WebP / HDR 画像です")
+    if not 0 < length <= MAX_BACKGROUND_BYTES:
+        raise ValueError("画像が空か、大きすぎます")
+    folder = safe_path(root, BACKGROUND_DIR)
+    os.makedirs(folder, exist_ok=True)
+    path = unique_path(os.path.join(folder, name))
+    _write(path, stream, length)
+    return _rel(root, path)
+
+
+def list_backgrounds(root: str) -> List[str]:
+    folder = os.path.join(os.path.abspath(root), BACKGROUND_DIR)
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    return [f"{BACKGROUND_DIR}/{n}" for n in names
+            if os.path.splitext(n)[1].lower() in BACKGROUND_EXTENSIONS and os.path.isfile(os.path.join(folder, n))]

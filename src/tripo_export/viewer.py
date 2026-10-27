@@ -29,6 +29,9 @@ MODEL_VIEWER_PATH = "/__viewer/model-viewer.min.js"
 UPLOAD_PATH = "/__viewer/upload"
 THUMBNAIL_PATH = "/__viewer/thumbnail"
 SCREENSHOT_PATH = "/__viewer/screenshot"
+VIDEO_PATH = "/__viewer/video"
+BACKGROUND_PATH = "/__viewer/background"
+BACKGROUNDS_PATH = "/__viewer/backgrounds"
 META_PATH = "/__viewer/meta"
 STATS_PATH = "/__viewer/stats"
 DUPLICATES_PATH = "/__viewer/duplicates"
@@ -141,6 +144,9 @@ class _Handler(SimpleHTTPRequestHandler):
             self._send(body, "application/json; charset=utf-8")
         elif path == MODEL_VIEWER_PATH:
             self._send(_asset("vendor/model-viewer.min.js"), "text/javascript; charset=utf-8", cache=True)
+        elif path == BACKGROUNDS_PATH:
+            body = json.dumps({"backgrounds": library.list_backgrounds(self.directory)}, ensure_ascii=False)
+            self._send(body.encode("utf-8"), "application/json; charset=utf-8")
         elif path == DUPLICATES_PATH:
             body = json.dumps({"groups": library.find_duplicates(self.directory)}, ensure_ascii=False).encode("utf-8")
             self._send(body, "application/json; charset=utf-8")
@@ -171,6 +177,12 @@ class _Handler(SimpleHTTPRequestHandler):
             if url.path == THUMBNAIL_PATH:
                 model = (query.get("model") or [""])[0]
                 return {"path": library.save_preview(self.directory, model, self.rfile, length)}
+            if url.path == VIDEO_PATH:
+                name = (query.get("name") or [""])[0]
+                return {"path": library.save_video(self.directory, name, self.rfile, length)}
+            if url.path == BACKGROUND_PATH:
+                name = (query.get("name") or [""])[0]
+                return {"path": library.save_background(self.directory, name, self.rfile, length)}
             if url.path == SCREENSHOT_PATH:
                 name = (query.get("name") or [""])[0]
                 return {"path": library.save_screenshot(self.directory, name, self.rfile, length)}
@@ -232,7 +244,8 @@ class _Handler(SimpleHTTPRequestHandler):
 
 
 SimpleHTTPRequestHandler.extensions_map.update({".glb": "model/gltf-binary", ".gltf": "model/gltf+json",
-                                                ".webp": "image/webp", ".usdz": "model/vnd.usdz+zip"})
+                                                ".webp": "image/webp", ".usdz": "model/vnd.usdz+zip",
+                                                ".webm": "video/webm", ".hdr": "image/vnd.radiance"})
 
 
 @functools.lru_cache(maxsize=None)
