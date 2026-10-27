@@ -9,6 +9,7 @@ Those need the per-server token that is written into the page, and a localhost H
 other web pages (including DNS-rebinding ones) cannot change the folder.
 """
 
+import base64
 import functools
 import json
 import os
@@ -42,6 +43,7 @@ RENAME_PATH = "/__viewer/rename"
 DELETE_PATH = "/__viewer/delete"
 MOVE_PATH = "/__viewer/move"
 CONVERT_PATH = "/__viewer/convert"
+LITE_PATH = "/__viewer/lite"
 TOKEN_HEADER = "X-Viewer-Token"
 TOKEN_PLACEHOLDER = b"__VIEWER_TOKEN__"
 MAX_UPLOAD_BYTES = 2 * 1024 ** 3
@@ -207,6 +209,9 @@ class _Handler(SimpleHTTPRequestHandler):
                 return {"moved_to": library.delete_model(self.directory, files)}
             if path == EXPORT_TEXTURES_PATH:
                 return {"folder": library.export_textures(self.directory, str(body.get("model") or ""))}
+            if path == LITE_PATH:
+                images = {int(k): (base64.b64decode(v["data"]), str(v["mime"])) for k, v in (body.get("images") or {}).items()}
+                return {"path": library.replace_images(self.directory, str(body.get("model") or ""), images)}
             if path == CONVERT_PATH:
                 return {"path": convert.convert(self.directory, str(body.get("model") or ""), str(body.get("format") or ""))}
             if path == MOVE_PATH:

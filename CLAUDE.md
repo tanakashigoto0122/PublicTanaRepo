@@ -94,6 +94,9 @@ Key constraints of the Tripo API that shape the design:
   `read_parts` walks the default scene applying node transforms. STL is binary, mm, Z-up, centred
   on X/Y and resting on Z = 0; OBJ goes to `<stem>_obj/` with an MTL and base color textures.
   Draco/meshopt-compressed files are refused. About 2.5 s for 500k triangles.
+  "Lightweight" (`POST /__viewer/lite`): the page scales textures down on a canvas and sends them
+  base64-encoded; `library.replace_images` rebuilds the BIN chunk into `<stem>_lite.glb`.
+  Polygon reduction is not implemented (it would need an external simplifier such as gltfpack).
 - `src/tripo_export/app.py`: the desktop app. A pywebview window (Edge WebView2 on Windows)
   shows the same viewer page with `?app=1`. The page detects `window.pywebview` and adds
   `body.app`, which reveals the toolbar, dialogs and job bar (`.app-only`). The page calls

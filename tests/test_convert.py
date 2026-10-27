@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from test_library import make_glb, make_png, touch
-from tripo_export import convert
+from tripo_export import convert, library
 
 # A unit square in the XZ plane (two triangles), facing +Y.
 SQUARE = [(-0.5, 0, -0.5), (0.5, 0, -0.5), (0.5, 0, 0.5), (-0.5, 0, 0.5)]
@@ -117,6 +117,24 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(convert.convert(self.root, "flat.glb", "stl"), "flat (2).stl")
         with open(os.path.join(self.root, "flat.stl"), "rb") as handle:
             self.assertEqual(handle.read(), b"mine")
+
+    def test_lite_copy_swaps_images_and_keeps_geometry(self):
+        touch(self.root, "tile.glb", mesh_glb([{"mesh": 0}], image=make_png(2048, 2048)))
+        small = make_png(512, 512) + b"smaller image data"
+        rel = library.replace_images(self.root, "tile.glb", {0: (small, "image/png")})
+        self.assertEqual(rel, "tile_lite.glb")
+        [texture] = library.list_textures(self.root, "tile_lite.glb")
+        self.assertEqual((texture["width"], texture["bytes"]), (512, len(small)))
+        self.assertEqual(library.read_texture(self.root, "tile_lite.glb", 0), (small, "image/png"))
+        original = convert.Gltf(self.root, "tile.glb")
+        lite = convert.Gltf(self.root, "tile_lite.glb")
+        for index in range(3):  # positions, UVs and indices are unchanged
+            self.assertEqual(original.accessor(index), lite.accessor(index))
+        self.assertEqual(len(read_stl(os.path.join(self.root, convert.convert(self.root, "tile_lite.glb", "stl")))), 2)
+        with self.assertRaises(ValueError):
+            library.replace_images(self.root, "tile.glb", {0: (b"not an image", "image/png")})
+        with self.assertRaises(ValueError):
+            library.replace_images(self.root, "tile.glb", {5: (small, "image/png")})
 
     def test_compressed_and_unsupported_inputs_are_refused(self):
         touch(self.root, "draco.glb", mesh_glb([{"mesh": 0}], extra={"extensionsRequired": ["KHR_draco_mesh_compression"]}))

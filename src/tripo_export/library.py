@@ -737,3 +737,55 @@ def list_backgrounds(root: str) -> List[str]:
         return []
     return [f"{BACKGROUND_DIR}/{n}" for n in names
             if os.path.splitext(n)[1].lower() in BACKGROUND_EXTENSIONS and os.path.isfile(os.path.join(folder, n))]
+
+
+LITE_SUFFIX = "_lite"
+
+
+def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]]) -> str:
+    """Write ``<stem>_lite.glb`` next to a .glb with some embedded images replaced.
+
+    ``images`` maps image index to (new bytes, MIME type), e.g. the same textures at a smaller
+    size. The binary chunk is rebuilt with every buffer view re-packed (4-byte aligned) and the
+    original file is left as it is. Returns the new file's relative path.
+    """
+    path = safe_path(root, model)
+    if not path.lower().endswith(".glb"):
+        raise ValueError("軽量化できるのは GLB だけです")
+    gltf = _gltf_json(path)
+    if len(gltf.get("buffers") or []) != 1 or "uri" in gltf["buffers"][0]:
+        raise ValueError("外部ファイルを参照する GLB には対応していません")
+    gltf_images = gltf.get("images") or []
+    swap = {}
+    for index, (data, mime) in images.items():
+        if not 0 <= index < len(gltf_images) or "bufferView" not in gltf_images[index]:
+            raise ValueError(f"その番号の画像はありません: {index}")
+        if mime not in _MIME_EXT or not image_size(data):
+            raise ValueError("PNG / JPEG / WebP の画像を渡してください")
+        swap[gltf_images[index]["bufferView"]] = (index, data, mime)
+    with open(path, "rb") as handle:
+        handle.seek(_glb_bin_offset(path))
+        old = handle.read(gltf["buffers"][0]["byteLength"])
+    chunks, offset = [], 0
+    for number, view in enumerate(gltf.get("bufferViews") or []):
+        if number in swap:
+            index, data, mime = swap[number]
+            gltf_images[index]["mimeType"] = mime
+        else:
+            start = view.get("byteOffset", 0)
+            data = old[start:start + view["byteLength"]]
+        pad = -offset % 4
+        chunks.append(b"\0" * pad + data)
+        offset += pad
+        view["byteOffset"], view["byteLength"] = offset, len(data)
+        offset += len(data)
+    binary = b"".join(chunks)
+    binary += b"\0" * (-len(binary) % 4)
+    gltf["buffers"][0]["byteLength"] = len(binary)
+    text = json.dumps(gltf, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    text += b" " * (-len(text) % 4)
+    body = (struct.pack("<II", len(text), _GLB_JSON_CHUNK) + text
+            + struct.pack("<II", len(binary), 0x004E4942) + binary)
+    target = unique_path(os.path.splitext(path)[0] + LITE_SUFFIX + ".glb")
+    _write(target, io.BytesIO(struct.pack("<III", _GLB_MAGIC, 2, 12 + len(body)) + body), 12 + len(body))
+    return _rel(root, target)
