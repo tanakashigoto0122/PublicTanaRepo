@@ -5,9 +5,11 @@ transform applied, so the output matches what the viewer shows. Compressed meshe
 meshopt) cannot be read and are reported as such.
 """
 
+import hashlib
 import math
 import os
 import struct
+import tempfile
 from array import array
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
@@ -306,10 +308,18 @@ def simplify(root: str, model: str, ratio: float) -> str:
     if not tool:
         raise ValueError("ポリゴン削減のツール（gltfpack）が見つかりません")
     target = library.unique_path(os.path.splitext(path)[0] + library.LITE_SUFFIX + ".glb")
+    _gltfpack(tool, path, target, ratio)
+    return library._rel(root, target)
+
+
+def _gltfpack(tool: str, source: str, target: str, ratio: float) -> None:
+    """Run gltfpack's simplifier into ``target`` (written whole or not at all)."""
+    import subprocess
+
     part = target + ".part.glb"
     try:
         result = subprocess.run(
-            [tool, "-i", path, "-o", part, "-si", f"{ratio:.4f}", "-noq"],
+            [tool, "-i", source, "-o", part, "-si", f"{ratio:.4f}", "-noq"],
             capture_output=True, text=True, timeout=600,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if result.returncode != 0 or not os.path.isfile(part):
@@ -319,7 +329,53 @@ def simplify(root: str, model: str, ratio: float) -> str:
     finally:
         if os.path.exists(part):
             os.remove(part)
-    return library._rel(root, target)
+
+
+# ---- Light previews of heavy models ---------------------------------------------------------
+
+# A model this heavy is shown from a simplified copy first: WebView2 needs several GB for a
+# multi-million-triangle model, enough to starve the rest of the PC.
+PREVIEW_TRIANGLES = 200_000
+PREVIEW_KEEP = 8  # cached copies kept; older ones are removed
+
+
+def preview_dir() -> str:
+    return os.path.join(tempfile.gettempdir(), "tripo-viewer-preview")
+
+
+def preview_copy(root: str, model: str, max_triangles: int = PREVIEW_TRIANGLES) -> str:
+    """Absolute path of a copy of ``model`` with at most about ``max_triangles`` triangles.
+
+    The copy is made with gltfpack into a cache outside the model folder (the folder is not
+    touched) and reused while the model file is unchanged. A model that is light enough
+    already is returned as it is.
+    """
+    path = library.safe_path(root, model)
+    if os.path.splitext(path)[1].lower() not in library.VIEWABLE:
+        raise ValueError("軽い版を作れるのは GLB / glTF だけです")
+    triangles = library.glb_stats(root, model)["triangles"]
+    if triangles <= max_triangles:
+        return path
+    stat = os.stat(path)
+    key = hashlib.sha1(f"{os.path.abspath(path)}|{stat.st_size}|{stat.st_mtime_ns}|{max_triangles}".encode()).hexdigest()
+    folder = preview_dir()
+    target = os.path.join(folder, key[:20] + ".glb")
+    if os.path.isfile(target):
+        os.utime(target)  # recently used: keep it
+        return target
+    tool = gltfpack_path()
+    if not tool:
+        raise ValueError("軽い版を作るツール（gltfpack）が見つかりません")
+    os.makedirs(folder, exist_ok=True)
+    _gltfpack(tool, path, target, max_triangles / triangles)
+    old = sorted((os.path.join(folder, n) for n in os.listdir(folder) if n.endswith(".glb")),
+                 key=os.path.getmtime, reverse=True)
+    for stale in old[PREVIEW_KEEP:]:
+        try:
+            os.remove(stale)
+        except OSError:
+            pass
+    return target
 
 
 # ---- Rigs (skeletons) -----------------------------------------------------------------------

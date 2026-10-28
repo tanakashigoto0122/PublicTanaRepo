@@ -127,6 +127,8 @@
   .picklist .sub { white-space: nowrap; }
   .hint { color: var(--muted); font-size: 12px; margin-top: auto; }
   .noview { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
+  .litebadge { position: absolute; left: 10px; bottom: 10px; z-index: 2; background: rgba(0,0,0,.55); color: #fff;
+               padding: 6px 10px; border-radius: 8px; font-size: 12px; display: flex; gap: 8px; align-items: center; }
   #thumbnailer { position: fixed; right: 0; bottom: 0; width: 256px; height: 256px; opacity: 0; pointer-events: none; z-index: -1; }
   body:not(.app) .app-only { display: none !important; }
   .appbar { max-width: 1400px; margin: 0 auto; padding: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -411,6 +413,13 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* full or blocked: thumbnails are just regenerated */ } },
 };
+// model-viewer keeps the last 5 models in memory by default; with heavy models that alone takes
+// several GB, so keep only the one on screen.
+customElements.whenDefined('model-viewer').then((MV) => { MV.modelCacheSize = 0; });
+// A model file bigger than this is first offered as a light copy (gltfpack, made by the server).
+const BIG_MODEL_BYTES = 40 * 1048576;
+const modelSize = (m) => (m.files.find((f) => f.path === m.model) || { size: 0 }).size;
+const previewUrl = (m) => `/__viewer/preview?model=${encodeURIComponent(m.model)}`;
 
 let models = [], shown = [], current = -1;
 let lastIndex = '';
@@ -540,7 +549,8 @@ async function pump() {
     const { card, m, key } = queue.shift();
     if (!card.isConnected) continue;
     try {
-      const src = url(m.model);
+      // Heavy models are thumbnailed from their light copy.
+      const src = modelSize(m) > BIG_MODEL_BYTES ? previewUrl(m) : url(m.model);
       // Setting the same src again fires no new load event (happens when the list is reloaded).
       if (!(tv.loaded && tv.src === src)) {
         await new Promise((resolve, reject) => {
@@ -575,17 +585,18 @@ function open(i) {
   current = (i + shown.length) % shown.length;
   const m = shown[current];
   const stage = $('stage');
-  stage.querySelector('model-viewer, .noview')?.remove();
-  if (m.model) {
-    const mv = document.createElement('model-viewer');
-    mv.setAttribute('camera-controls', '');
-    mv.setAttribute('touch-action', 'pan-y');
-    mv.setAttribute('interaction-prompt', 'none');
-    if ($('c-rotate').checked) mv.setAttribute('auto-rotate', '');
-    applyLook(mv);
-    mv.addEventListener('load', () => showLoaded(mv), { once: true });
-    mv.src = url(m.model);
-    stage.prepend(mv);
+  stage.querySelectorAll('model-viewer, .noview, .litebadge').forEach((e) => e.remove());
+  if (m.model && modelSize(m) > BIG_MODEL_BYTES) {
+    // Heavy: ask first, a light copy or the real thing.
+    const nv = document.createElement('div');
+    nv.className = 'noview';
+    nv.innerHTML = `<div>大きいモデルです（${fmtSize(modelSize(m))}）。そのまま表示すると、メモリを数 GB 使うことがあります。<br><br>
+      <button class="btn primary" data-lite>軽い版で表示</button> <button class="btn" data-full>そのまま表示</button></div>`;
+    nv.querySelector('[data-lite]').onclick = () => showModel(m, true);
+    nv.querySelector('[data-full]').onclick = () => showModel(m, false);
+    stage.prepend(nv);
+  } else if (m.model) {
+    showModel(m, false);
   } else {
     const nv = document.createElement('div');
     nv.className = 'noview';
@@ -634,6 +645,30 @@ function open(i) {
   $('d-texbox').hidden = true;
   if (m.model) { showStats(m); showTextures(m); }
   if (!$('dlg').open) $('dlg').showModal();
+}
+
+// The 3D view of a model; "lite" shows the server's simplified copy (heavy models) with a note.
+function showModel(m, lite) {
+  const stage = $('stage');
+  stage.querySelectorAll('model-viewer, .noview, .litebadge').forEach((e) => e.remove());
+  const mv = document.createElement('model-viewer');
+  mv.setAttribute('camera-controls', '');
+  mv.setAttribute('touch-action', 'pan-y');
+  mv.setAttribute('interaction-prompt', 'none');
+  if ($('c-rotate').checked) mv.setAttribute('auto-rotate', '');
+  applyLook(mv);
+  mv.addEventListener('load', () => showLoaded(mv), { once: true });
+  if (lite) {
+    const badge = document.createElement('div');
+    badge.className = 'litebadge';
+    badge.innerHTML = '<span>軽い版を作っています…</span><button class="btn">元のモデルを表示</button>';
+    badge.querySelector('button').onclick = () => showModel(m, false);
+    mv.addEventListener('load', () => { badge.querySelector('span').textContent = '軽い版を表示中（形は少し粗くなります）'; }, { once: true });
+    mv.addEventListener('error', () => { badge.querySelector('span').textContent = '軽い版を作れませんでした'; }, { once: true });
+    stage.append(badge);
+  }
+  mv.src = lite ? previewUrl(m) : url(m.model);
+  stage.prepend(mv);
 }
 
 function addInfo(label, value) {

@@ -4,6 +4,7 @@ import os
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 from rigged_sample import JOINTS, rigged_glb
 from test_library import make_glb, make_png, touch
@@ -52,6 +53,26 @@ def read_stl(path):
     self_len = 84 + 50 * count
     assert len(data) == self_len, (len(data), self_len)
     return [struct.unpack_from("<12f", data, 84 + 50 * i) for i in range(count)]
+
+
+def bump_glb(height=0.2):
+    """A 40x40 grid of quads (3200 triangles) with a bump, so there is something to simplify."""
+    n = 41
+    pos = [(i / (n - 1) - 0.5, height * math.exp(-((i - 20) ** 2 + (j - 20) ** 2) / 60), j / (n - 1) - 0.5)
+           for j in range(n) for i in range(n)]
+    idx = [k for j in range(n - 1) for i in range(n - 1)
+           for k in (j * n + i, (j + 1) * n + i, j * n + i + 1, j * n + i + 1, (j + 1) * n + i, (j + 1) * n + i + 1)]
+    binary = b"".join(struct.pack("<3f", *p) for p in pos)
+    indices = b"".join(struct.pack("<I", k) for k in idx)
+    gltf = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0}],
+            "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
+            "buffers": [{"byteLength": len(binary) + len(indices)}],
+            "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(binary)},
+                            {"buffer": 0, "byteOffset": len(binary), "byteLength": len(indices)}],
+            "accessors": [{"bufferView": 0, "componentType": 5126, "count": len(pos), "type": "VEC3",
+                           "min": [-0.5, 0, -0.5], "max": [0.5, height, 0.5]},
+                          {"bufferView": 1, "componentType": 5125, "count": len(idx), "type": "SCALAR"}]}
+    return make_glb(gltf, binary + indices)
 
 
 class ConvertTests(unittest.TestCase):
@@ -112,6 +133,26 @@ class ConvertTests(unittest.TestCase):
         self.assertIn("Kd 1.0000 0.5000 0.2500", mtl)
         self.assertIn("map_Kd tile_tex0.png", mtl)
 
+    @unittest.skipUnless(convert.gltfpack_path(), "gltfpack is not installed here (the exe bundles it)")
+    def test_preview_copy_is_cached_outside_the_folder(self):
+        cache = os.path.join(self.root, "cache")
+        touch(self.root, "bump.glb", bump_glb())
+        with mock.patch.object(convert, "preview_dir", return_value=cache), \
+             mock.patch.object(convert, "PREVIEW_KEEP", 1):
+            light = convert.preview_copy(self.root, "bump.glb", max_triangles=800)
+            self.assertEqual(os.path.dirname(light), cache)
+            self.assertLess(library.glb_stats(cache, os.path.basename(light))["triangles"], 1600)
+            self.assertEqual(convert.preview_copy(self.root, "bump.glb", max_triangles=800), light)  # reused
+            # Light enough already: the model itself.
+            self.assertEqual(convert.preview_copy(self.root, "bump.glb", max_triangles=5000),
+                             os.path.join(self.root, "bump.glb"))
+            # A changed model gets a new copy, and only the newest PREVIEW_KEEP copies stay.
+            touch(self.root, "bump.glb", bump_glb(height=0.3))
+            newer = convert.preview_copy(self.root, "bump.glb", max_triangles=800)
+            self.assertNotEqual(newer, light)
+            self.assertEqual(os.listdir(cache), [os.path.basename(newer)])
+        self.assertEqual(sorted(os.listdir(self.root)), ["bump.glb", "cache"])  # nothing else in the folder
+
     def test_existing_output_is_not_overwritten(self):
         touch(self.root, "flat.glb", mesh_glb([{"mesh": 0}]))
         touch(self.root, "flat.stl", b"mine")
@@ -139,23 +180,7 @@ class ConvertTests(unittest.TestCase):
 
     @unittest.skipUnless(convert.gltfpack_path(), "gltfpack is not installed here (the exe bundles it)")
     def test_simplify_reduces_triangles_and_lite_copy_can_shrink_in_place(self):
-        # A 40x40 grid of quads (3200 triangles) with a bump, so there is something to simplify.
-        n = 41
-        pos = [(i / (n - 1) - 0.5, 0.2 * math.exp(-((i - 20) ** 2 + (j - 20) ** 2) / 60), j / (n - 1) - 0.5)
-               for j in range(n) for i in range(n)]
-        idx = [k for j in range(n - 1) for i in range(n - 1)
-               for k in (j * n + i, (j + 1) * n + i, j * n + i + 1, j * n + i + 1, (j + 1) * n + i, (j + 1) * n + i + 1)]
-        binary = b"".join(struct.pack("<3f", *p) for p in pos)
-        indices = b"".join(struct.pack("<I", k) for k in idx)
-        gltf = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0}],
-                "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
-                "buffers": [{"byteLength": len(binary) + len(indices)}],
-                "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(binary)},
-                                {"buffer": 0, "byteOffset": len(binary), "byteLength": len(indices)}],
-                "accessors": [{"bufferView": 0, "componentType": 5126, "count": len(pos), "type": "VEC3",
-                               "min": [-0.5, 0, -0.5], "max": [0.5, 0.2, 0.5]},
-                              {"bufferView": 1, "componentType": 5125, "count": len(idx), "type": "SCALAR"}]}
-        touch(self.root, "bump.glb", make_glb(gltf, binary + indices))
+        touch(self.root, "bump.glb", bump_glb())
         rel = convert.simplify(self.root, "bump.glb", 0.25)
         self.assertEqual(rel, "bump_lite.glb")
         before = library.glb_stats(self.root, "bump.glb")["triangles"]

@@ -106,6 +106,11 @@ Key constraints of the Tripo API that shape the design:
   positions and parents and a humanoid check against Mixamo/VRM/Rigify-style names; "骨を表示" draws
   them like the dimension lines. `convert` format `mixamo` zips the OBJ export for Mixamo.
   `tests/rigged_sample.py` builds a small skinned humanoid for tests and manual checks.
+  Heavy models: the page sets model-viewer's `modelCacheSize` to 0 (by default it keeps five models in
+  memory), and a model file over 40 MB (`BIG_MODEL_BYTES`) is offered as a light copy first:
+  `GET /__viewer/preview?model=` (`convert.preview_copy`) runs gltfpack down to about 200k triangles into
+  a cache under the system temp folder (`preview_dir()`, newest 8 kept, keyed by path/size/mtime) and
+  serves it; a model already that light is redirected to its own URL. Thumbnails of heavy models use it too.
   App-only "Unity に送る" (`AppApi.send_to_unity`, `library.send_to_unity`) copies FBX/GLB/glTF/OBJ
   into `<unity project>/Assets/TripoGame/Characters`; the project is `settings.unity_project` or
   `~/UnityProjects/TripoGame` (the companion project the TripoGame folder holds).

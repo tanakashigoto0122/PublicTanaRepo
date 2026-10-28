@@ -404,6 +404,16 @@ class ChangeEndpointTests(unittest.TestCase):
         self.assertEqual(stats["triangles"], 14)
         self.assertEqual(self.call("POST", viewer.META_PATH, b'{"key": "cube.glb"}', token="x")[0], 403)
 
+    def test_preview_endpoint(self):
+        touch(self.root, "cube.glb", make_glb(CUBE))
+        # A light model is simply the file itself (redirected to it).
+        with urllib.request.urlopen(self.base + viewer.PREVIEW_PATH + "?model=cube.glb") as res:
+            self.assertEqual(res.read(), make_glb(CUBE))
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(self.base + viewer.PREVIEW_PATH + "?model=../outside.glb")
+        caught.exception.close()
+        self.assertEqual(caught.exception.code, 400)
+
     def test_move_endpoint(self):
         touch(self.root, "cat.glb")
         status, res = self.call("POST", viewer.MOVE_PATH, json.dumps({"files": ["cat.glb"], "folder": "animals"}).encode())

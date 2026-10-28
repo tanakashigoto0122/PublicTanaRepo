@@ -19,7 +19,7 @@ import webbrowser
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from html import escape as html_escape
 
@@ -48,6 +48,7 @@ MOVE_PATH = "/__viewer/move"
 CONVERT_PATH = "/__viewer/convert"
 LITE_PATH = "/__viewer/lite"
 SIMPLIFY_PATH = "/__viewer/simplify"
+PREVIEW_PATH = "/__viewer/preview"
 SHARE_PATH = "/__viewer/share"
 SHARE_STOP_PATH = "/__viewer/share/stop"
 TOKEN_HEADER = "X-Viewer-Token"
@@ -159,6 +160,25 @@ class _Handler(SimpleHTTPRequestHandler):
         elif path == DUPLICATES_PATH:
             body = json.dumps({"groups": library.find_duplicates(self.directory)}, ensure_ascii=False).encode("utf-8")
             self._send(body, "application/json; charset=utf-8")
+        elif path == PREVIEW_PATH:
+            # A light copy of a heavy model for showing (convert.preview_copy); the folder is not changed.
+            model = (parse_qs(urlsplit(self.path).query).get("model") or [""])[0]
+            try:
+                copy = convert.preview_copy(self.directory, model)
+                if copy == library.safe_path(self.directory, model):
+                    # Light enough already: the file itself (a .gltf needs its own URL for its buffers).
+                    self.send_response(302)
+                    self.send_header("Location", "/" + quote(model))
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                with open(copy, "rb") as handle:
+                    data = handle.read()
+            except (ValueError, OSError, KeyError) as exc:
+                body = json.dumps({"error": str(exc) or type(exc).__name__}, ensure_ascii=False).encode("utf-8")
+                self._send(body, "application/json; charset=utf-8", status=400)
+                return
+            self._send(data, "model/gltf-binary")
         elif path in (STATS_PATH, TEXTURES_PATH, TEXTURE_PATH, RIG_PATH):
             query = parse_qs(urlsplit(self.path).query)
             model = (query.get("model") or [""])[0]
