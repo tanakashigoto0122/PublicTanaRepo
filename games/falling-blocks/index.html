@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ブロック落とし</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <style>
+    .play {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin: 12px 0;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 1px;
+      width: min(62vw, 260px, calc((100svh - 330px) / 2));
+      min-width: 180px;
+      aspect-ratio: 1 / 2;
+      padding: 2px;
+      background: var(--border);
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+    .cell { background: var(--surface); border-radius: 2px; }
+    .cell[data-type="1"] { background: var(--piece-i); }
+    .cell[data-type="2"] { background: var(--piece-o); }
+    .cell[data-type="3"] { background: var(--piece-t); }
+    .cell[data-type="4"] { background: var(--piece-s); }
+    .cell[data-type="5"] { background: var(--piece-z); }
+    .cell[data-type="6"] { background: var(--piece-j); }
+    .cell[data-type="7"] { background: var(--piece-l); }
+    /* 落ちる位置の目安 */
+    .cell.ghost { background: var(--tile); outline: 1px dashed var(--muted); outline-offset: -2px; }
+    .side { display: grid; gap: 8px; min-width: 0; }
+    .side dl { margin: 0; display: grid; gap: 2px; }
+    .side dt { color: var(--muted); font-size: 0.85rem; }
+    .side dd { margin: 0 0 6px; font-weight: 700; font-size: 1.1rem; }
+    .side button { padding: 8px; white-space: nowrap; }
+    .next {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      width: 64px;
+      aspect-ratio: 1;
+    }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      width: min(100%, 420px);
+    }
+    .controls button {
+      height: 56px;
+      padding: 0;
+      font-size: 1.4rem;
+      /* 連打でズームしない・長押しでメニューを出さない */
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .controls button:active { background: var(--tile); }
+    .controls .label { display: block; font-size: 0.7rem; color: var(--muted); line-height: 1; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>ブロック落とし</h1>
+    <p class="muted">落ちてくるブロックを動かして横一列をそろえると消える。上まで積み上がったらゲームオーバー。</p>
+    <div class="play">
+      <div class="board" id="board"></div>
+      <div class="side">
+        <dl>
+          <dt>つぎ</dt>
+          <dd><div class="next" id="next"></div></dd>
+          <dt>スコア</dt>
+          <dd id="score">0</dd>
+          <dt>ベスト</dt>
+          <dd id="best">0</dd>
+          <dt>レベル</dt>
+          <dd id="level">1</dd>
+          <dt>ライン</dt>
+          <dd id="lines">0</dd>
+        </dl>
+        <button id="start">スタート</button>
+      </div>
+    </div>
+    <p class="status" id="status">スタートを押すと始まるよ。</p>
+    <div class="controls" id="controls">
+      <button data-action="left" aria-label="左">←<span class="label">左</span></button>
+      <button data-action="soft" aria-label="下">↓<span class="label">下</span></button>
+      <button data-action="right" aria-label="右">→<span class="label">右</span></button>
+      <button data-action="rotate" aria-label="回転">⟳<span class="label">回転</span></button>
+      <button data-action="hard" aria-label="落とす">⤓<span class="label">落とす</span></button>
+    </div>
+    <p class="muted">キーボード: ← → で移動、↑ か X で回転、↓ で下へ、スペースで一気に落とす、P で一時停止。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
