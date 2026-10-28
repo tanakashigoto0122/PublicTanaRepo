@@ -6,6 +6,14 @@
   --accent: #2563eb;
   --border: #d8dee4;
   --tile: #e8eefc;
+  /* ブロック落としの 7 種類のブロック */
+  --piece-i: #0891b2;
+  --piece-o: #ca8a04;
+  --piece-t: #9333ea;
+  --piece-s: #16a34a;
+  --piece-z: #dc2626;
+  --piece-j: #2563eb;
+  --piece-l: #ea580c;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -16,6 +24,13 @@
     --accent: #6ea8fe;
     --border: #3d444d;
     --tile: #26324a;
+    --piece-i: #22d3ee;
+    --piece-o: #facc15;
+    --piece-t: #c084fc;
+    --piece-s: #4ade80;
+    --piece-z: #f87171;
+    --piece-j: #60a5fa;
+    --piece-l: #fb923c;
   }
 }
 * { box-sizing: border-box; }

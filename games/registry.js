@@ -11,4 +11,9 @@ export const games = [
     title: '2048',
     description: 'タイルを上下左右に寄せて同じ数字を合体させ、2048 を目指すパズル。',
   },
+  {
+    id: 'falling-blocks',
+    title: 'ブロック落とし',
+    description: '落ちてくるブロックを回して並べ、横一列をそろえて消すアクションパズル。',
+  },
 ];
