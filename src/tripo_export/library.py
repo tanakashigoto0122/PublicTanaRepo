@@ -20,7 +20,9 @@ from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 from .exporter import MANIFEST_NAME
 
 # model-viewer renders glTF only; other formats are offered as downloads on the same card.
-VIEWABLE = (".glb", ".gltf")
+VIEWABLE = (".glb", ".gltf", ".vrm")
+# A .vrm is a .glb with VRM extensions (avatar meta, humanoid bones, MToon materials).
+BINARY_GLTF = (".glb", ".vrm")
 MODEL_EXTENSIONS = VIEWABLE + (".fbx", ".obj", ".stl", ".3mf", ".usdz")
 IMAGE_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
 PREVIEW_SUFFIX = "_preview"
@@ -453,6 +455,10 @@ _GLB_JSON_CHUNK = 0x4E4F534A
 _TRIANGLES = 4
 
 
+def is_binary_gltf(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in BINARY_GLTF
+
+
 def _gltf_json(path: str) -> Dict[str, Any]:
     """The JSON part of a .glb (only the header and JSON chunk are read) or a whole .gltf."""
     with open(path, "rb") as handle:
@@ -474,7 +480,7 @@ def glb_stats(root: str, model: str) -> Dict[str, int]:
     """
     path = safe_path(root, model)
     if os.path.splitext(path)[1].lower() not in VIEWABLE:
-        raise ValueError("GLB / glTF だけ対応しています")
+        raise ValueError("GLB / glTF / VRM だけ対応しています")
     gltf = _gltf_json(path)
     accessors = gltf.get("accessors") or []
 
@@ -495,6 +501,119 @@ def glb_stats(root: str, model: str) -> Dict[str, int]:
     return {"triangles": triangles, "vertices": vertices, "meshes": len(gltf.get("meshes") or []),
             "materials": len(gltf.get("materials") or []), "textures": len(gltf.get("images") or []),
             "animations": len(gltf.get("animations") or []), "skins": len(gltf.get("skins") or [])}
+
+
+# ---- VRM avatars: meta and license -------------------------------------------------------
+
+# Labels for the license fields of VRM 0.x (extensions.VRM.meta) and 1.0 (VRMC_vrm.meta).
+_VRM0_LICENSE = (
+    ("allowedUserName", "アバターとして使える人", {"OnlyAuthor": "作者だけ", "ExplicitlyLicensedPerson": "許可された人だけ",
+                                                 "Everyone": "誰でも"}),
+    ("violentUssageName", "暴力表現", {"Disallow": "不可", "Allow": "可"}),
+    ("sexualUssageName", "性的表現", {"Disallow": "不可", "Allow": "可"}),
+    ("commercialUssageName", "商用利用", {"Disallow": "不可", "Allow": "可"}),
+    ("licenseName", "ライセンス", {"Redistribution_Prohibited": "再配布禁止", "CC0": "CC0（権利放棄）",
+                                   "CC_BY": "CC BY", "CC_BY_NC": "CC BY-NC", "CC_BY_SA": "CC BY-SA",
+                                   "CC_BY_NC_SA": "CC BY-NC-SA", "CC_BY_ND": "CC BY-ND", "CC_BY_NC_ND": "CC BY-NC-ND",
+                                   "Other": "その他（URL を見てください）"}),
+    ("otherPermissionUrl", "そのほかの許諾 URL", None),
+    ("otherLicenseUrl", "ライセンス URL", None),
+)
+_YES_NO = {True: "可", False: "不可"}
+_VRM1_LICENSE = (
+    ("avatarPermission", "アバターとして使える人", {"onlyAuthor": "作者だけ", "onlySeparatelyLicensedPerson": "許可された人だけ",
+                                                  "everyone": "誰でも"}),
+    ("commercialUsage", "商用利用", {"personalNonProfit": "個人の非営利のみ", "personalProfit": "個人なら営利も可",
+                                     "corporation": "法人も可"}),
+    ("allowRedistribution", "再配布", _YES_NO),
+    ("modification", "改変", {"prohibited": "不可", "allowModification": "可（改変したものの再配布は不可）",
+                              "allowModificationRedistribution": "可（改変したものの再配布も可）"}),
+    ("creditNotation", "クレジット表記", {"required": "必要", "unnecessary": "不要"}),
+    ("allowExcessivelyViolentUsage", "過度な暴力表現", _YES_NO),
+    ("allowExcessivelySexualUsage", "過度な性的表現", _YES_NO),
+    ("allowPoliticalOrReligiousUsage", "政治・宗教目的", _YES_NO),
+    ("allowAntisocialOrHateUsage", "反社会的・ヘイト目的", _YES_NO),
+    ("licenseUrl", "ライセンス URL", None),
+    ("otherLicenseUrl", "そのほかのライセンス URL", None),
+    ("thirdPartyLicenses", "第三者のライセンス", None),
+)
+
+
+def _text(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def _license_rows(meta: Dict[str, Any], fields: Any) -> List[List[str]]:
+    """[label, value] pairs; a value that is not a known one is shown as written."""
+    rows = []
+    for key, label, names in fields:
+        value = meta.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            shown = names.get(value, _text(value)) if names else _text(value)
+        except TypeError:  # an unhashable value (list, dict) where a name was expected
+            shown = _text(value)
+        rows.append([label, shown])
+    return rows
+
+
+def _vrm_meta(gltf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Title, authors and license rows of a VRM 0.x or 1.0 avatar; None when it is not a VRM.
+
+    ``redistribution`` is True only when the license clearly allows passing the file on.
+    ``thumbnail`` is the index of the avatar's own thumbnail image, if it has one.
+    """
+    ext = gltf.get("extensions") or {}
+    if isinstance(ext.get("VRMC_vrm"), dict):
+        meta = ext["VRMC_vrm"].get("meta") or {}
+        thumb = meta.get("thumbnailImage")
+        return {"spec": "1.0", "title": _text(meta.get("name")), "version": _text(meta.get("version")),
+                "authors": [_text(a) for a in meta.get("authors") or [] if _text(a)],
+                "copyright": _text(meta.get("copyrightInformation")), "contact": _text(meta.get("contactInformation")),
+                "references": [_text(r) for r in meta.get("references") or [] if _text(r)],
+                "license": _license_rows(meta, _VRM1_LICENSE), "redistribution": meta.get("allowRedistribution") is True,
+                "thumbnail": thumb if isinstance(thumb, int) and thumb >= 0 else None}
+    if isinstance(ext.get("VRM"), dict):
+        meta = ext["VRM"].get("meta") or {}
+        # VRM 0.x names a texture (not an image) as the thumbnail; -1 means none.
+        texture, textures = meta.get("texture"), gltf.get("textures") or []
+        thumb = textures[texture].get("source") if isinstance(texture, int) and 0 <= texture < len(textures) else None
+        return {"spec": "0.x", "title": _text(meta.get("title")), "version": _text(meta.get("version")),
+                "authors": [_text(meta.get("author"))] if _text(meta.get("author")) else [],
+                "copyright": "", "contact": _text(meta.get("contactInformation")),
+                "references": [_text(meta.get("reference"))] if _text(meta.get("reference")) else [],
+                "license": _license_rows(meta, _VRM0_LICENSE),
+                "redistribution": meta.get("licenseName", "") not in ("", "Redistribution_Prohibited", "Other"),
+                "thumbnail": thumb if isinstance(thumb, int) and thumb >= 0 else None}
+    return None
+
+
+def vrm_meta(root: str, model: str) -> Optional[Dict[str, Any]]:
+    """``_vrm_meta`` of a model file in ``root`` (None for a file without VRM extensions)."""
+    path = safe_path(root, model)
+    if os.path.splitext(path)[1].lower() not in VIEWABLE:
+        raise ValueError("GLB / glTF / VRM だけ対応しています")
+    return _vrm_meta(_gltf_json(path))
+
+
+_vrm_spec_cache: Dict[Tuple[str, int, int], Optional[str]] = {}
+
+
+def vrm_spec(path: str) -> Optional[str]:
+    """"0.x" or "1.0" for a VRM file (cached by path, size and mtime), None otherwise.
+
+    The index carries it for every .vrm: VRM 0.x avatars face -Z, so the page turns them round.
+    """
+    try:
+        stat = os.stat(path)
+        key = (os.path.abspath(path), stat.st_size, stat.st_mtime_ns)
+        if key not in _vrm_spec_cache:
+            meta = _vrm_meta(_gltf_json(path))
+            _vrm_spec_cache[key] = meta["spec"] if meta else None
+        return _vrm_spec_cache[key]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
 
 
 MAX_SCREENSHOT_BYTES = 50 * 1024 * 1024
@@ -560,6 +679,14 @@ def find_duplicates(root: str) -> List[List[str]]:
 
 _TEXTURE_USES = (("baseColorTexture", "ベースカラー"), ("metallicRoughnessTexture", "金属・粗さ"),
                  ("normalTexture", "法線"), ("occlusionTexture", "AO（陰影）"), ("emissiveTexture", "発光"))
+# VRM's toon shader (MToon): 1.0 as a material extension, 0.x as Unity property names.
+_MTOON_USES = (("shadeMultiplyTexture", "影色"), ("shadingShiftTexture", "影のずれ"), ("matcapTexture", "マットキャップ"),
+               ("rimMultiplyTexture", "リム"), ("outlineWidthMultiplyTexture", "輪郭線の太さ"),
+               ("uvAnimationMaskTexture", "UV アニメのマスク"))
+_VRM0_TEXTURE_USES = {"_MainTex": "ベースカラー", "_ShadeTexture": "影色", "_BumpMap": "法線", "_EmissionMap": "発光",
+                      "_SphereAdd": "マットキャップ", "_RimTexture": "リム", "_OutlineWidthTexture": "輪郭線の太さ",
+                      "_ReceiveShadowTexture": "影の受け方", "_ShadingGradeTexture": "影の強さ",
+                      "_UvAnimMaskTexture": "UV アニメのマスク"}
 _MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/ktx2": ".ktx2"}
 TEXTURE_DIR = "textures"
 
@@ -609,7 +736,7 @@ def _image_bytes(root: str, model: str, gltf: Dict[str, Any], index: int) -> Tup
     mime = image.get("mimeType") or ""
     if "bufferView" in image:
         view = gltf["bufferViews"][image["bufferView"]]
-        if not path.lower().endswith(".glb"):
+        if not is_binary_gltf(path):
             raise ValueError("glTF の外部バッファの画像には対応していません")
         with open(path, "rb") as handle:
             handle.seek(_glb_bin_offset(path) + view.get("byteOffset", 0))
@@ -629,18 +756,33 @@ def list_textures(root: str, model: str) -> List[Dict[str, Any]]:
     """The images of a .glb/.gltf: format, size in bytes and pixels, and what each is used for."""
     path = safe_path(root, model)
     if os.path.splitext(path)[1].lower() not in VIEWABLE:
-        raise ValueError("GLB / glTF だけ対応しています")
+        raise ValueError("GLB / glTF / VRM だけ対応しています")
     gltf = _gltf_json(path)
     uses: Dict[int, List[str]] = {}
     textures = gltf.get("textures") or []
+
+    def use(texture: Any, label: str) -> None:
+        if isinstance(texture, int) and 0 <= texture < len(textures):
+            source = textures[texture].get("source")
+            if source is not None and label not in uses.setdefault(source, []):
+                uses[source].append(label)
+
     for material in gltf.get("materials") or []:
-        slots = dict(material.get("pbrMetallicRoughness") or {}, **material)
-        for slot, label in _TEXTURE_USES:
+        mtoon = (material.get("extensions") or {}).get("VRMC_materials_mtoon") or {}
+        slots = {**(material.get("pbrMetallicRoughness") or {}), **material, **mtoon}
+        for slot, label in _TEXTURE_USES + _MTOON_USES:
             ref = slots.get(slot)
-            if isinstance(ref, dict) and 0 <= ref.get("index", -1) < len(textures):
-                source = textures[ref["index"]].get("source")
-                if source is not None and label not in uses.setdefault(source, []):
-                    uses[source].append(label)
+            if isinstance(ref, dict):
+                use(ref.get("index"), label)
+    # VRM 0.x keeps its MToon textures (shade, matcap...) in its own material list.
+    vrm0 = (gltf.get("extensions") or {}).get("VRM")
+    if isinstance(vrm0, dict):
+        for props in vrm0.get("materialProperties") or []:
+            for slot, texture in ((props or {}).get("textureProperties") or {}).items():
+                use(texture, _VRM0_TEXTURE_USES.get(slot, slot))
+    meta = _vrm_meta(gltf)
+    if meta and meta["thumbnail"] is not None and "サムネイル" not in uses.setdefault(meta["thumbnail"], []):
+        uses[meta["thumbnail"]].append("サムネイル")
     result = []
     for index, image in enumerate(gltf.get("images") or []):
         try:
@@ -743,7 +885,7 @@ LITE_SUFFIX = "_lite"
 
 
 def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]], in_place: bool = False) -> str:
-    """Write ``<stem>_lite.glb`` next to a .glb with some embedded images replaced.
+    """Write ``<stem>_lite.glb`` (``_lite.vrm``) next to a .glb/.vrm with some embedded images replaced.
 
     With ``in_place`` a file that is already a lite copy (from ``convert.simplify``) is
     rewritten instead; originals are never overwritten.
@@ -753,8 +895,8 @@ def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]], 
     original file is left as it is. Returns the new file's relative path.
     """
     path = safe_path(root, model)
-    if not path.lower().endswith(".glb"):
-        raise ValueError("軽量化できるのは GLB だけです")
+    if not is_binary_gltf(path):
+        raise ValueError("軽量化できるのは GLB / VRM だけです")
     gltf = _gltf_json(path)
     if len(gltf.get("buffers") or []) != 1 or "uri" in gltf["buffers"][0]:
         raise ValueError("外部ファイルを参照する GLB には対応していません")
@@ -791,7 +933,9 @@ def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]], 
             + struct.pack("<II", len(binary), 0x004E4942) + binary)
     if in_place and not os.path.splitext(os.path.basename(path))[0].split(" (")[0].endswith(LITE_SUFFIX):
         raise ValueError("上書きできるのは軽量化したファイル（_lite.glb）だけです")
-    target = path if in_place else unique_path(os.path.splitext(path)[0] + LITE_SUFFIX + ".glb")
+    stem, ext = os.path.splitext(path)
+    # A VRM stays a VRM (its extensions refer to textures by index, which do not change).
+    target = path if in_place else unique_path(stem + LITE_SUFFIX + ext.lower())
     _write(target, io.BytesIO(struct.pack("<III", _GLB_MAGIC, 2, 12 + len(body)) + body), 12 + len(body))
     return _rel(root, target)
 
@@ -799,7 +943,7 @@ def replace_images(root: str, model: str, images: Dict[int, Tuple[bytes, str]], 
 # ---- Handing models to a Unity project -----------------------------------------------------
 
 UNITY_CHARACTERS = "Assets/TripoGame/Characters"
-_UNITY_SEND = (".fbx", ".glb", ".gltf", ".obj")
+_UNITY_SEND = (".fbx", ".glb", ".gltf", ".obj", ".vrm")
 
 
 def is_unity_project(folder: str) -> bool:
@@ -808,7 +952,7 @@ def is_unity_project(folder: str) -> bool:
 
 
 def send_to_unity(root: str, files: List[str], project: str) -> List[str]:
-    """Copy a model's files Unity can import (FBX/GLB/glTF/OBJ) into the project's Characters folder.
+    """Copy a model's files Unity can import (FBX/GLB/glTF/OBJ/VRM) into the project's Characters folder.
 
     Existing files are not overwritten (``name (2).fbx``). Returns the copied paths relative
     to the Unity project.
@@ -826,5 +970,5 @@ def send_to_unity(root: str, files: List[str], project: str) -> List[str]:
         shutil.copy2(src, dst)
         sent.append(os.path.relpath(dst, project).replace(os.sep, "/"))
     if not sent:
-        raise ValueError("Unity に送れるファイル（FBX / GLB / glTF / OBJ）がありません")
+        raise ValueError("Unity に送れるファイル（FBX / GLB / glTF / OBJ / VRM）がありません")
     return sent

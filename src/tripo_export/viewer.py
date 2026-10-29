@@ -40,6 +40,8 @@ STATS_PATH = "/__viewer/stats"
 DUPLICATES_PATH = "/__viewer/duplicates"
 TEXTURES_PATH = "/__viewer/textures"
 RIG_PATH = "/__viewer/rig"
+VRM_PATH = "/__viewer/vrm"
+VRM_THUMBNAIL_PATH = "/__viewer/vrm/thumbnail"
 TEXTURE_PATH = "/__viewer/texture"
 EXPORT_TEXTURES_PATH = "/__viewer/textures/export"
 RENAME_PATH = "/__viewer/rename"
@@ -111,6 +113,7 @@ def build_index(root: str) -> List[Dict[str, Any]]:
                 "created": parsed["created"],
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
                 "model": None,
+                "vrm": None,
                 "preview": None,
                 "files": [],
                 "_stems": [],
@@ -120,6 +123,8 @@ def build_index(root: str) -> List[Dict[str, Any]]:
             item["files"].append({"path": rel, "format": ext[1:].upper(), "size": stat.st_size})
             if ext in VIEWABLE and item["model"] is None:
                 item["model"] = rel
+                # "0.x" or "1.0": the page turns VRM 0.x avatars (they face -Z) and reads their meta.
+                item["vrm"] = library.vrm_spec(path) if ext == ".vrm" else None
 
     meta = library.read_meta(root)
     result = []
@@ -179,10 +184,23 @@ class _Handler(SimpleHTTPRequestHandler):
                 self._send(body, "application/json; charset=utf-8", status=400)
                 return
             self._send(data, "model/gltf-binary")
-        elif path in (STATS_PATH, TEXTURES_PATH, TEXTURE_PATH, RIG_PATH):
+        elif path in (STATS_PATH, TEXTURES_PATH, TEXTURE_PATH, RIG_PATH, VRM_PATH, VRM_THUMBNAIL_PATH):
             query = parse_qs(urlsplit(self.path).query)
             model = (query.get("model") or [""])[0]
             try:
+                if path == VRM_THUMBNAIL_PATH:
+                    # The avatar's own thumbnail (VRM meta), shown in the gallery instead of a render.
+                    thumb = (library.vrm_meta(self.directory, model) or {}).get("thumbnail")
+                    if thumb is None:
+                        self._send(b'{"error": "no thumbnail"}', "application/json", status=404)
+                        return
+                    data, mime = library.read_texture(self.directory, model, thumb)
+                    self._send(data, mime or "application/octet-stream")
+                    return
+                if path == VRM_PATH:
+                    result, status = {"vrm": library.vrm_meta(self.directory, model)}, 200
+                    self._send(json.dumps(result, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+                    return
                 if path == TEXTURE_PATH:
                     data, mime = library.read_texture(self.directory, model, int((query.get("index") or ["-1"])[0]))
                     self._send(data, mime or "application/octet-stream")
@@ -288,6 +306,7 @@ class _Handler(SimpleHTTPRequestHandler):
 
 
 SimpleHTTPRequestHandler.extensions_map.update({".glb": "model/gltf-binary", ".gltf": "model/gltf+json",
+                                                ".vrm": "model/gltf-binary",
                                                 ".webp": "image/webp", ".usdz": "model/vnd.usdz+zip",
                                                 ".webm": "video/webm", ".hdr": "image/vnd.radiance"})
 
@@ -347,7 +366,7 @@ model-viewer{{width:100%;height:100%}} #ar{{position:absolute;left:50%;bottom:24
 font-size:17px;padding:12px 22px;border-radius:999px;border:none;background:#3a5bd9;color:#fff}}
 h1{{position:absolute;top:10px;left:14px;margin:0;font-size:15px;color:#333}}</style></head>
 <body><h1>{title}</h1><model-viewer src="model.glb" camera-controls auto-rotate ar ar-modes="webxr scene-viewer quick-look"
-environment-image="neutral" shadow-intensity="0.8"><button slot="ar-button" id="ar">AR で置いてみる</button></model-viewer></body></html>"""
+orientation="0deg 0deg {yaw}deg" environment-image="neutral" shadow-intensity="0.8"><button slot="ar-button" id="ar">AR で置いてみる</button></model-viewer></body></html>"""
 
 
 class _ShareHandler(SimpleHTTPRequestHandler):
@@ -367,7 +386,7 @@ class _ShareHandler(SimpleHTTPRequestHandler):
             return
         name = path[len(prefix):]
         if name in ("", "index.html"):
-            page = _SHARE_PAGE.format(title=html_escape(share.title))
+            page = _SHARE_PAGE.format(title=html_escape(share.title), yaw=share.yaw)
             self._reply(page.encode("utf-8"), "text/html; charset=utf-8")
         elif name == "model.glb":
             with open(share.model_path, "rb") as handle:
@@ -394,6 +413,8 @@ class ShareServer(ThreadingHTTPServer):
 
     def __init__(self, model_path: str, title: str, host: str = "0.0.0.0"):
         self.model_path, self.title = model_path, title
+        # VRM 0.x avatars face -Z; turned round they face the viewer like other models.
+        self.yaw = 180 if library.vrm_spec(model_path) == "0.x" else 0
         self.token = secrets.token_urlsafe(12)
         super().__init__((host, 0), _ShareHandler)
 
@@ -426,14 +447,14 @@ def stop_share() -> None:
 
 
 def start_share(root: str, model: str, title: str, host: str = "0.0.0.0") -> Dict[str, Any]:
-    """Share one .glb on the LAN for SHARE_MINUTES (replacing any earlier share).
+    """Share one .glb/.vrm on the LAN for SHARE_MINUTES (replacing any earlier share).
 
     host is only changed by tests, which must not open a port to the network.
     """
     global _share
     path = library.safe_path(root, model)
-    if not (path.lower().endswith(".glb") and os.path.isfile(path)):
-        raise ValueError("スマホで見られるのは GLB だけです")
+    if not (library.is_binary_gltf(path) and os.path.isfile(path)):
+        raise ValueError("スマホで見られるのは GLB / VRM だけです")
     stop_share()
     server = ShareServer(path, title, host)
     threading.Thread(target=server.serve_forever, daemon=True).start()

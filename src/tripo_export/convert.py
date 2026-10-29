@@ -39,7 +39,7 @@ class Gltf:
     def _load_buffer(self, index: int, buffer: Dict[str, Any]) -> bytes:
         uri = buffer.get("uri")
         if uri is None:
-            if not self.path.lower().endswith(".glb") or index != 0:
+            if not library.is_binary_gltf(self.path) or index != 0:
                 raise ValueError("バッファが見つかりません")
             with open(self.path, "rb") as handle:
                 handle.seek(library._glb_bin_offset(self.path))
@@ -264,7 +264,7 @@ def to_obj(root: str, model: str) -> str:
 
 def convert(root: str, model: str, fmt: str) -> str:
     if os.path.splitext(model)[1].lower() not in library.VIEWABLE:
-        raise ValueError("変換できるのは GLB / glTF だけです")
+        raise ValueError("変換できるのは GLB / glTF / VRM だけです")
     fmt = fmt.lower()
     if fmt == "stl":
         return to_stl(root, model)
@@ -296,12 +296,13 @@ def simplify(root: str, model: str, ratio: float) -> str:
     gltfpack keeps UV seams and normals sensible and stops early rather than wrecking the shape
     (its default 1% error limit), so the result can keep somewhat more than asked for.
     ``-noq`` keeps plain float attributes so every loader (and convert.py) can read the file.
+    A VRM comes out as a plain .glb: gltfpack drops the VRM extensions (expressions, spring bones).
     """
     import subprocess
 
     path = library.safe_path(root, model)
     if os.path.splitext(path)[1].lower() not in library.VIEWABLE:
-        raise ValueError("ポリゴン削減できるのは GLB / glTF だけです")
+        raise ValueError("ポリゴン削減できるのは GLB / glTF / VRM だけです")
     if not 0 < ratio < 1:
         raise ValueError("残す割合は 0 より大きく 1 より小さくしてください")
     tool = gltfpack_path()
@@ -314,12 +315,17 @@ def simplify(root: str, model: str, ratio: float) -> str:
 
 def _gltfpack(tool: str, source: str, target: str, ratio: float) -> None:
     """Run gltfpack's simplifier into ``target`` (written whole or not at all)."""
+    import shutil
     import subprocess
 
     part = target + ".part.glb"
+    # gltfpack reads only .glb/.gltf names, so a .vrm goes in as a temporary .glb copy.
+    renamed = None if os.path.splitext(source)[1].lower() in (".glb", ".gltf") else target + ".in.glb"
     try:
+        if renamed:
+            shutil.copyfile(source, renamed)
         result = subprocess.run(
-            [tool, "-i", source, "-o", part, "-si", f"{ratio:.4f}", "-noq"],
+            [tool, "-i", renamed or source, "-o", part, "-si", f"{ratio:.4f}", "-noq"],
             capture_output=True, text=True, timeout=600,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if result.returncode != 0 or not os.path.isfile(part):
@@ -327,8 +333,9 @@ def _gltfpack(tool: str, source: str, target: str, ratio: float) -> None:
             raise ValueError("ポリゴン削減に失敗しました: " + (message[-1] if message else f"code {result.returncode}"))
         os.replace(part, target)
     finally:
-        if os.path.exists(part):
-            os.remove(part)
+        for temp in (part, renamed):
+            if temp and os.path.exists(temp):
+                os.remove(temp)
 
 
 # ---- Light previews of heavy models ---------------------------------------------------------
@@ -352,7 +359,7 @@ def preview_copy(root: str, model: str, max_triangles: int = PREVIEW_TRIANGLES) 
     """
     path = library.safe_path(root, model)
     if os.path.splitext(path)[1].lower() not in library.VIEWABLE:
-        raise ValueError("軽い版を作れるのは GLB / glTF だけです")
+        raise ValueError("軽い版を作れるのは GLB / glTF / VRM だけです")
     triangles = library.glb_stats(root, model)["triangles"]
     if triangles <= max_triangles:
         return path
@@ -393,6 +400,27 @@ _HUMANOID_PARTS = {
 }
 
 
+# The same body parts as VRM humanoid bone names (identical in VRM 0.x and 1.0).
+_VRM_PARTS = {"hips": ("hips",), "spine": ("spine", "chest"), "head": ("head",),
+              "left arm": ("leftUpperArm",), "right arm": ("rightUpperArm",),
+              "left leg": ("leftUpperLeg",), "right leg": ("rightUpperLeg",)}
+
+
+def _vrm_bones(gltf: Dict[str, Any]) -> List[str]:
+    """Humanoid bone names a VRM maps to nodes: VRM 0.x has a list, 1.0 a dict."""
+    ext = gltf.get("extensions") or {}
+    try:
+        if isinstance(ext.get("VRMC_vrm"), dict):
+            return [name for name, bone in (ext["VRMC_vrm"]["humanoid"]["humanBones"] or {}).items()
+                    if isinstance(bone, dict) and "node" in bone]
+        if isinstance(ext.get("VRM"), dict):
+            return [b["bone"] for b in ext["VRM"]["humanoid"]["humanBones"] or []
+                    if isinstance(b, dict) and "bone" in b and b.get("node", -1) >= 0]
+    except (KeyError, TypeError, AttributeError):
+        pass
+    return []
+
+
 def _plain(name: str) -> str:
     name = name.lower().rsplit(":", 1)[-1]
     for prefix in ("j_bip_c_", "j_bip_l_", "j_bip_r_", "bip01_", "bip001_", "def-", "orgbip_"):
@@ -416,10 +444,13 @@ def _world_matrices(gltf: Dict[str, Any]) -> Tuple[Dict[int, Matrix], Dict[int, 
 
 
 def rig_info(root: str, model: str) -> Dict[str, Any]:
-    """The first skin's joints (name, rest position, parent joint) and whether it looks humanoid."""
+    """The first skin's joints (name, rest position, parent joint) and whether it looks humanoid.
+
+    A VRM names its humanoid bones itself, so its own bone map decides instead of joint names.
+    """
     path = library.safe_path(root, model)
     if os.path.splitext(path)[1].lower() not in library.VIEWABLE:
-        raise ValueError("GLB / glTF だけ対応しています")
+        raise ValueError("GLB / glTF / VRM だけ対応しています")
     gltf = library._gltf_json(path)
     skins = gltf.get("skins") or []
     if not skins:
@@ -442,6 +473,10 @@ def rig_info(root: str, model: str) -> Dict[str, Any]:
     raw = " ".join(j["name"] for j in joints).lower()
     style = ("Mixamo" if "mixamorig" in raw else "VRM / Unity" if "j_bip" in raw
              else "Blender (Rigify)" if "def-" in raw else None)
+    bones = _vrm_bones(gltf)
+    if bones:
+        missing = [part for part, keys in _VRM_PARTS.items() if not any(k in bones for k in keys)]
+        style = "VRM"
     return {"skins": len(skins), "joints": joints, "humanoid": not missing, "missing": missing, "style": style}
 
 

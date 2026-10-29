@@ -106,12 +106,20 @@ Key constraints of the Tripo API that shape the design:
   positions and parents and a humanoid check against Mixamo/VRM/Rigify-style names; "骨を表示" draws
   them like the dimension lines. `convert` format `mixamo` zips the OBJ export for Mixamo.
   `tests/rigged_sample.py` builds a small skinned humanoid for tests and manual checks.
+  VRM (`.vrm`, a GLB with VRM extensions) is in `library.VIEWABLE`; `library.is_binary_gltf` covers .glb/.vrm.
+  `library.vrm_meta` reads title, authors and Japanese license rows from `extensions.VRM.meta` (0.x) or
+  `VRMC_vrm.meta` (1.0) for `GET /__viewer/vrm?model=`; `GET /__viewer/vrm/thumbnail?model=` serves the avatar's
+  own thumbnail, which the gallery uses before rendering one. Index entries carry `vrm` ("0.x"/"1.0",
+  `library.vrm_spec`, cached); VRM 0.x faces -Z, so the page adds 180° yaw (`data-face`) and the share page
+  does the same. `rig_info` trusts the VRM humanoid bone map. Texture shrinking writes `_lite.vrm`; gltfpack
+  only reads .glb/.gltf names, so `_gltfpack` feeds a .vrm through a temporary .glb copy and the result is a
+  plain `_lite.glb` without VRM data. `tests/test_vrm.py` builds small synthetic VRMs.
   Heavy models: the page sets model-viewer's `modelCacheSize` to 0 (by default it keeps five models in
   memory), and a model file over 40 MB (`BIG_MODEL_BYTES`) is offered as a light copy first:
   `GET /__viewer/preview?model=` (`convert.preview_copy`) runs gltfpack down to about 200k triangles into
   a cache under the system temp folder (`preview_dir()`, newest 8 kept, keyed by path/size/mtime) and
   serves it; a model already that light is redirected to its own URL. Thumbnails of heavy models use it too.
-  App-only "Unity に送る" (`AppApi.send_to_unity`, `library.send_to_unity`) copies FBX/GLB/glTF/OBJ
+  App-only "Unity に送る" (`AppApi.send_to_unity`, `library.send_to_unity`) copies FBX/GLB/glTF/OBJ/VRM
   into `<unity project>/Assets/TripoGame/Characters`; the project is `settings.unity_project` or
   `~/UnityProjects/TripoGame` (the companion project the TripoGame folder holds).
   "View on phone" (`POST /__viewer/share`, `/__viewer/share/stop`): `viewer.start_share` runs a

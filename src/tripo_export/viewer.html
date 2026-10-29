@@ -104,6 +104,9 @@
   dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
   dt { color: var(--muted); } dd { margin: 0; word-break: break-all; }
   .prompt { background: var(--surface-2); border-radius: 8px; padding: 10px; font-size: 13px; white-space: pre-wrap; }
+  .vrm { border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 13px; display: grid; gap: 8px; }
+  .vrm h4 { margin: 0; font-size: 13px; }
+  .vrm .warn { color: var(--danger); font-weight: 600; }
   .files a { display: flex; justify-content: space-between; gap: 8px; text-decoration: none; color: var(--accent);
              padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
   .files a span { color: var(--muted); }
@@ -236,6 +239,7 @@
       <button class="star" id="d-fav">☆ お気に入り</button>
       <div class="prompt" id="d-prompt" hidden></div>
       <dl id="d-info"></dl>
+      <div class="vrm" id="d-vrm" hidden></div>
       <div class="tags" id="d-tags"></div>
       <textarea id="d-memo" placeholder="メモ（検索の対象になります）"></textarea>
       <details id="d-texbox" hidden>
@@ -272,7 +276,7 @@
         <button class="btn" id="d-shot" title="今の表示を PNG で screenshots フォルダに保存します">画像として保存</button>
         <button class="btn" id="d-video" title="モデルが一周する動画（WebM）を screenshots フォルダに保存します">一周動画を保存</button>
         <button class="btn" id="d-stl" title="3D プリント用。mm 単位・Z が上・床に接地。クレジットは使いません">STL に変換</button>
-        <button class="btn app-only" id="d-unity" title="FBX / GLB を Unity プロジェクト（TripoGame）の Characters フォルダにコピーします">Unity に送る</button>
+        <button class="btn app-only" id="d-unity" title="FBX / GLB / VRM を Unity プロジェクト（TripoGame）の Characters フォルダにコピーします">Unity に送る</button>
         <button class="btn" id="d-phone" title="同じ Wi-Fi のスマホで、このモデルを見たり AR で置いたりできます">スマホで見る</button>
         <button class="btn" id="d-lite" title="ポリゴンやテクスチャを減らした軽い GLB（_lite.glb）を別に作ります。元のファイルはそのまま">軽量化…</button>
         <button class="btn" id="d-mixamo" title="Mixamo（無料の自動リグ付け）にそのまま上げられる zip（OBJ + テクスチャ）を作ります">Mixamo 用 zip</button>
@@ -324,6 +328,7 @@
   <h3>軽量化</h3>
   <p class="note">軽くしたコピー（<code>名前_lite.glb</code>）を別に作ります。元のファイルはそのままです。</p>
   <p class="note" id="lite-now"></p>
+  <p class="note" id="lite-vrm" hidden>VRM の場合: テクスチャだけ小さくすると VRM のまま（<code>名前_lite.vrm</code>）です。ポリゴン数を減らすと、表情や揺れものなどの VRM の情報がない普通の GLB になります。</p>
   <label class="field"><span>目的</span><select id="lite-preset">
     <option value="">自分で選ぶ</option>
     <option value="10000,1024">スマホゲーム向け（1 万三角形・1024px）</option>
@@ -536,9 +541,16 @@ function setThumb(card, m) {
   const key = `tripo-thumb:${m.model}:${totalSize(m)}:${m.modified}`;
   const cached = store.get(key);
   if (cached) return showImg(card, cached);
-  queue.push({ card, m, key });
-  pump();
+  const render = () => { queue.push({ card, m, key }); pump(); };
+  if (!m.vrm) return render();
+  // A VRM usually carries its author's thumbnail; without one it is rendered like other models.
+  const probe = new Image();
+  probe.onload = () => showImg(card, probe.src);
+  probe.onerror = render;
+  probe.src = `/__viewer/vrm/thumbnail?model=${encodeURIComponent(m.model)}&v=${totalSize(m)}`;
 }
+// VRM 0.x avatars face -Z (the back faces the camera); they are turned round when shown.
+const faceYaw = (m) => (m.vrm === '0.x' ? 180 : 0);
 async function pump() {
   if (busy) return;
   busy = true;
@@ -551,6 +563,7 @@ async function pump() {
     try {
       // Heavy models are thumbnailed from their light copy.
       const src = modelSize(m) > BIG_MODEL_BYTES ? previewUrl(m) : url(m.model);
+      tv.setAttribute('orientation', `0deg 0deg ${faceYaw(m)}deg`);
       // Setting the same src again fires no new load event (happens when the list is reloaded).
       if (!(tv.loaded && tv.src === src)) {
         await new Promise((resolve, reject) => {
@@ -634,8 +647,11 @@ function open(i) {
   $('prev').hidden = $('next').hidden = shown.length < 2;
   $('d-anim-row').hidden = true;
   $('d-thumb').hidden = $('d-shot').hidden = $('d-video').hidden = $('d-stl').hidden = $('d-obj').hidden = !m.model;
-  $('d-lite').hidden = $('d-phone').hidden = !m.model?.toLowerCase().endsWith('.glb');
-  $('d-mixamo').hidden = !m.model;
+  $('d-lite').hidden = $('d-phone').hidden = !/\.(glb|vrm)$/i.test(m.model || '');
+  // A VRM is rigged already; Mixamo is for adding a rig.
+  $('d-mixamo').hidden = !m.model || !!m.vrm;
+  $('d-vrm').hidden = true;
+  if (m.vrm) showVrm(m);
   $('c-bones-row').hidden = true;
   currentRig = null;
   if (m.model) showRig(m);
@@ -652,6 +668,7 @@ function showModel(m, lite) {
   const stage = $('stage');
   stage.querySelectorAll('model-viewer, .noview, .litebadge').forEach((e) => e.remove());
   const mv = document.createElement('model-viewer');
+  mv.dataset.face = faceYaw(m);
   mv.setAttribute('camera-controls', '');
   mv.setAttribute('touch-action', 'pan-y');
   mv.setAttribute('interaction-prompt', 'none');
@@ -675,6 +692,32 @@ function addInfo(label, value) {
   const dt = document.createElement('dt'); dt.textContent = label;
   const dd = document.createElement('dd'); dd.textContent = value;
   $('d-info').append(dt, dd);
+}
+
+// VRM avatar: title, author and license terms from its meta (library.vrm_meta).
+async function showVrm(m) {
+  try {
+    const { vrm, error } = await fetch(`/__viewer/vrm?model=${encodeURIComponent(m.model)}`).then((r) => r.json());
+    if (error || !vrm || shown[current] !== m || !$('dlg').open) return;
+    const box = $('d-vrm');
+    const head = document.createElement('h4');
+    head.textContent = `VRM ${vrm.spec}${vrm.title ? ` · ${vrm.title}` : ''}${vrm.version ? `（${vrm.version}）` : ''}`;
+    const rows = [['作者', vrm.authors.join('、')], ['著作権', vrm.copyright], ['連絡先', vrm.contact],
+                  ['参照', vrm.references.join('、')], ...vrm.license];
+    const dl = document.createElement('dl');
+    for (const [k, v] of rows.filter(([, v]) => v)) {
+      const dt = document.createElement('dt'); dt.textContent = k;
+      const dd = document.createElement('dd'); dd.textContent = v;
+      dl.append(dt, dd);
+    }
+    const note = document.createElement('div');
+    note.className = vrm.redistribution ? 'note' : 'warn';
+    note.textContent = vrm.redistribution
+      ? '再配布はライセンスの条件の範囲で可能です。細かい条件は作者のページも確認してください。'
+      : '再配布できません。公開リポジトリやゲームの配布物にこのファイルを入れないでください。';
+    box.replaceChildren(head, dl, note);
+    box.hidden = false;
+  } catch { /* the VRM meta is shown when it can be read */ }
 }
 
 // Polygon and texture counts, read by the server from the file (no need to wait for rendering).
@@ -859,7 +902,8 @@ function applyLightDir(mv) {
   const angle = Number($('c-lightdir').value);
   const before = Number(mv.dataset.lightdir || 0);
   mv.dataset.lightdir = angle;
-  mv.setAttribute('orientation', `0deg 0deg ${angle}deg`);
+  // data-face turns a model that faces away (VRM 0.x) without moving the camera.
+  mv.setAttribute('orientation', `0deg 0deg ${angle + Number(mv.dataset.face || 0)}deg`);
   if (!mv.loaded) {
     mv.setAttribute('camera-orbit', `${angle}deg 75deg 105%`);
     return;
@@ -1003,7 +1047,7 @@ loadBackgrounds();
 
 // ---- Changing the folder: add (drag & drop), rename, delete ---------------------------------
 const token = document.querySelector('meta[name=viewer-token]').content;
-const MODEL_EXT = /\.(glb|gltf|fbx|obj|stl|3mf|usdz|zip)$/i;
+const MODEL_EXT = /\.(glb|gltf|vrm|fbx|obj|stl|3mf|usdz|zip)$/i;
 let toastTimer;
 function toast(text, error = false, ms = 4000) {
   const el = $('toast');
@@ -1219,10 +1263,11 @@ $('dup-select').onclick = () => {
 $('sel-compare').onclick = () => {
   const pair = selectedModels();
   if (pair.length !== 2) return;
-  if (!pair.every((m) => m.model)) return toast('比較できるのは GLB / glTF のモデルだけです', true);
+  if (!pair.every((m) => m.model)) return toast('比較できるのは GLB / glTF / VRM のモデルだけです', true);
   const viewers = pair.map((m) => {
     const box = document.createElement('div');
     const mv = document.createElement('model-viewer');
+    mv.dataset.face = faceYaw(m);
     mv.setAttribute('camera-controls', '');
     mv.setAttribute('interaction-prompt', 'none');
     mv.toggleAttribute('auto-rotate', $('cmp-rotate').checked);
@@ -1348,6 +1393,7 @@ async function shrinkTextures(model, limit, inPlace) {
 $('d-lite').onclick = async () => {
   const m = shown[current];
   showMsg('lite-msg', '');
+  $('lite-vrm').hidden = !m.vrm;
   $('lite-now').textContent = '今のモデルを調べています…';
   $('dlg-lite').showModal();
   const [stats, tex] = await Promise.all([
@@ -1497,7 +1543,7 @@ document.addEventListener('drop', async (e) => {
   const files = [...e.dataTransfer.files];
   const models = files.filter((f) => MODEL_EXT.test(f.name));
   const skipped = files.length - models.length;
-  if (!models.length) return toast('追加できるのは GLB / glTF / FBX / OBJ / STL / 3MF / USDZ と、それらが入った zip です', true);
+  if (!models.length) return toast('追加できるのは GLB / glTF / VRM / FBX / OBJ / STL / 3MF / USDZ と、それらが入った zip です', true);
   let added = 0;
   const errors = [];
   for (const f of models) {
@@ -1634,7 +1680,9 @@ $('d-unity').onclick = async () => {
   const m = shown[current];
   const res = await api().send_to_unity(m.files.map((f) => f.path));
   if (res.error) return toast(res.error, true, 8000);
-  toast(`Unity に送りました: ${res.sent.join(', ')}（Unity の Project ウィンドウ → TripoGame/Characters）`, false, 8000);
+  const vrmNote = res.sent.some((p) => /\.vrm$/i.test(p))
+    ? '。VRM は Unity に VRM の読み込み機能（UniVRM など）がないと取り込めません。TripoGame 側の手順で取り込んでください' : '';
+  toast(`Unity に送りました: ${res.sent.join(', ')}（Unity の Project ウィンドウ → TripoGame/Characters）${vrmNote}`, false, 10000);
 };
 $('s-save').onclick = async () => {
   const values = { china: $('s-china').checked };
