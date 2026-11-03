@@ -27,6 +27,8 @@ Never commit secrets, API keys, tokens, or personal data.
   `assets/vendor/three/README.md`）。ページの `<script type="importmap">` で `three` と `three/addons/` を
   そこに向けて読み込む。`logic.js` からは Three.js を import しない（テストを依存なしで動かすため）。
   同梱ファイルは手で編集せず、更新するときは npm の tarball から差し替える。
+- **例外: 物理演算の cannon-es。** `assets/vendor/cannon-es/` に同梱し、Three.js と同じく importmap の
+  `cannon-es` で読み込む。扱いのルール（`logic.js` から import しない、手で編集しない）も Three.js と同じ。
 - **ロジックと描画を分ける。** 各ゲームの盤面・ルール・勝敗判定は DOM に触れない
   `logic.js` に純粋関数として書き、`main.js` は DOM の描画と入力処理だけを担う。
   `logic.js` は `tests/` から直接 import してテストする。
@@ -39,6 +41,7 @@ Never commit secrets, API keys, tokens, or personal data.
 index.html              トップページ（ゲーム一覧）
 assets/style.css        全ページ共通のスタイル。色は :root の CSS 変数（ダークモード対応）
 assets/vendor/three/    同梱した Three.js（3D を使うページだけが読み込む）
+assets/vendor/cannon-es/ 同梱した物理エンジン cannon-es（物理積み木が読み込む）
 games/registry.js       ゲーム一覧の登録先
 games/<id>/index.html   各ゲームのページ（ページ固有のスタイルは <style> に書く）
 games/<id>/logic.js     DOM に依存しないゲームロジック
