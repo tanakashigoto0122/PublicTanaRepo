@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3Dビューア</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <!-- Three.js はリポジトリに同梱したものを読み込む（CDN は使わない） -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../assets/vendor/three/build/three.module.js",
+        "three/addons/": "../../assets/vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+  <style>
+    .viewer {
+      position: relative;
+      width: 100%;
+      height: min(62svh, 480px);
+      min-height: 260px;
+      margin: 12px 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      /* 指での回転・拡大をページのスクロールやズームに取られないようにする */
+      touch-action: none;
+    }
+    .viewer canvas { display: block; width: 100%; height: 100%; }
+    .viewer.dragging { border-color: var(--accent); border-style: dashed; }
+    .drop-hint {
+      position: absolute;
+      inset: auto 0 8px;
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .file-button { position: relative; overflow: hidden; }
+    .file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .settings {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px 16px;
+      padding: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .settings label { display: grid; gap: 2px; font-size: 0.9rem; }
+    .settings label.check { display: flex; align-items: center; gap: 6px; }
+    .settings input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .settings input[type="color"] { width: 100%; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; }
+    .stats {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 2px 12px;
+      margin: 12px 0 0;
+      font-size: 0.9rem;
+    }
+    .stats dt { color: var(--muted); }
+    .stats dd { margin: 0; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>3Dビューア</h1>
+    <p class="muted">1 本指で回転、2 本指でつまんで拡大・ずらす（マウスは左ドラッグで回転、ホイールで拡大、右ドラッグでずらす）。</p>
+    <div class="viewer" id="viewer">
+      <p class="drop-hint">ここに .glb / .gltf / .obj / .stl をドロップしても開ける</p>
+    </div>
+    <p class="status" id="status"></p>
+    <div class="toolbar">
+      <label class="file-button">
+        <button type="button" tabindex="-1">ファイルを開く</button>
+        <input type="file" id="file" accept=".glb,.gltf,.obj,.stl">
+      </label>
+      <select id="sample" aria-label="サンプル">
+        <option value="">サンプルを表示…</option>
+        <option value="knot">ねじれた輪</option>
+        <option value="shapes">いろいろな形</option>
+        <option value="tower">積み木の塔</option>
+      </select>
+      <button id="reset">視点を戻す</button>
+      <button id="screenshot">画像を保存</button>
+    </div>
+    <div class="settings">
+      <label>光の向き <input type="range" id="azimuth" min="0" max="360" value="45"></label>
+      <label>光の高さ <input type="range" id="elevation" min="0" max="90" value="50"></label>
+      <label>明るさ <input type="range" id="intensity" min="0" max="300" value="150"></label>
+      <label>ツヤ <input type="range" id="gloss" min="0" max="100" value="40"></label>
+      <label>色（OBJ / STL とサンプル） <input type="color" id="color"></label>
+      <label class="check"><input type="checkbox" id="auto-rotate"> 自動で回す</label>
+      <label class="check"><input type="checkbox" id="wireframe"> ワイヤーフレーム</label>
+      <label class="check"><input type="checkbox" id="grid" checked> 床のグリッド</label>
+    </div>
+    <dl class="stats">
+      <dt>モデル</dt><dd id="stat-name">-</dd>
+      <dt>頂点</dt><dd id="stat-vertices">-</dd>
+      <dt>三角形</dt><dd id="stat-triangles">-</dd>
+      <dt>大きさ</dt><dd id="stat-size">-</dd>
+      <dt>ファイル</dt><dd id="stat-file">-</dd>
+      <dt>アニメ</dt><dd id="stat-animations">-</dd>
+    </dl>
+    <p class="muted">ファイルはこのブラウザの中で開くだけで、どこにも送信されません。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
