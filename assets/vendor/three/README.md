@@ -2,13 +2,14 @@
 
 - バージョン: 0.186.1（npm の `three` パッケージ）
 - ライセンス: MIT（[LICENSE](LICENSE)）
-- 3D ビューアと 3D 積み木で使う分だけを、パッケージ内と同じパスで置いている
+- 3D を使うゲームで使う分だけを、パッケージ内と同じパスで置いている
 
 ```
 build/three.module.js, build/three.core.js
 examples/jsm/controls/OrbitControls.js, TransformControls.js
 examples/jsm/exporters/GLTFExporter.js
 examples/jsm/loaders/GLTFLoader.js, OBJLoader.js, STLLoader.js
+examples/jsm/math/ConvexHull.js
 examples/jsm/utils/BufferGeometryUtils.js, SkeletonUtils.js   (GLTFLoader が使う)
 ```
 

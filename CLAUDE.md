@@ -32,6 +32,8 @@ Never commit secrets, API keys, tokens, or personal data.
 - **ロジックと描画を分ける。** 各ゲームの盤面・ルール・勝敗判定は DOM に触れない
   `logic.js` に純粋関数として書き、`main.js` は DOM の描画と入力処理だけを担う。
   `logic.js` は `tests/` から直接 import してテストする。
+  ほかのゲームと同じ処理は、コピーせずにそのゲームの `logic.js` から import してよい
+  （例: `soft-blocks/logic.js` は `physics-blocks/logic.js` の形や接着の処理を使う）。
 - **トップページは `games/registry.js` から一覧を生成する。** ゲームを追加したら必ず登録する。
   `tests/registry.test.js` が登録内容とディレクトリの対応を検証する。
 
