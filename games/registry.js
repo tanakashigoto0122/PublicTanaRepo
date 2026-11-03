@@ -21,4 +21,9 @@ export const games = [
     title: '3Dビューア',
     description: '3D モデル（glb / gltf / obj / stl）を指で回して眺める。光や色も変えられる。',
   },
+  {
+    id: 'block-builder',
+    title: '3D積み木',
+    description: '箱や球を置いて、動かす・大きさを変える・回す・色を塗る。作品は .glb で書き出せる。',
+  },
 ];
