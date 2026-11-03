@@ -16,4 +16,9 @@ export const games = [
     title: 'ブロック落とし',
     description: '落ちてくるブロックを回して並べ、横一列をそろえて消すアクションパズル。',
   },
+  {
+    id: 'model-viewer',
+    title: '3Dビューア',
+    description: '3D モデル（glb / gltf / obj / stl）を指で回して眺める。光や色も変えられる。',
+  },
 ];
