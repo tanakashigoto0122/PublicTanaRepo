@@ -36,4 +36,9 @@ export const games = [
     title: 'やわらか積み木',
     description: '物理積み木の、パーツごとに柔らかさを決められる版。しなる板・ロープ・ゼリーも置ける。',
   },
+  {
+    id: 'model-blocks',
+    title: '自分の3D積み木',
+    description: 'やわらか積み木に、自分の 3D モデル（glb / obj / stl）を持ち込んで積み木として置ける。',
+  },
 ];
