@@ -26,4 +26,9 @@ export const games = [
     title: '3D積み木',
     description: '箱や球を置いて、動かす・大きさを変える・回す・色を塗る。作品は .glb で書き出せる。',
   },
+  {
+    id: 'physics-blocks',
+    title: '物理積み木',
+    description: '重力のある世界で積み木を積んで、つかんで揺らして、接着でくっつける。硬さや重力も変えられる。',
+  },
 ];
