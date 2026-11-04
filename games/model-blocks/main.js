@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { ConvexHull } from 'three/addons/math/ConvexHull.js';
@@ -36,6 +37,8 @@ const MAX_MODEL_OBJECTS = 30;
 const MODEL_GAP = 0.5;
 const DB_NAME = 'mini-games-model-blocks';
 const DB_STORE = 'models';
+// これより細かいモデルは、たくさん置くとスマホでは重くなりやすいので、読み込んだときに知らせる
+const HEAVY_TRIANGLES = 300000;
 
 const viewerEl = document.getElementById('viewer');
 const statusEl = document.getElementById('status');
@@ -392,7 +395,9 @@ let storageAvailable = true;
 
 async function parseModel({ format, data }) {
   if (format === 'glb' || format === 'gltf') {
-    const gltf = await new GLTFLoader().parseAsync(format === 'gltf' ? new TextDecoder().decode(data) : data, '');
+    // gltfpack などで meshopt 圧縮した .glb も開けるようにする
+    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    const gltf = await loader.parseAsync(format === 'gltf' ? new TextDecoder().decode(data) : data, '');
     return gltf.scene;
   }
   const material = () => new THREE.MeshStandardMaterial({ color: cssValue('--piece-j'), side: THREE.DoubleSide });
@@ -450,6 +455,10 @@ function prepareModel(record, object) {
     size: size.map((v) => v * normalizeScale(size, 1)),
     // 色や質感を持たない形式は、置くときに選んだ色で塗る
     tintable: record.format === 'obj' || record.format === 'stl',
+    triangles: meshes.reduce((sum, mesh) => {
+      const { index, attributes } = mesh.geometry;
+      return sum + (index ? index.count : attributes.position.count) / 3;
+    }, 0),
   };
 }
 
@@ -622,8 +631,9 @@ async function importFile(file) {
   }
   setStatus(`「${file.name}」を読み込み中…`);
   const record = { id: newModelId(), name: file.name, format, data: await file.arrayBuffer(), addedAt: Date.now() };
+  let model;
   try {
-    await addToLibrary(record);
+    model = await addToLibrary(record);
   } catch (error) {
     console.warn(error);
     const hint = format === 'gltf' ? '（.gltf は別ファイルの .bin や画像を読み込めないので、.glb がおすすめ）' : '';
@@ -632,7 +642,10 @@ async function importFile(file) {
   }
   kindEl.value = `model:${record.id}`;
   setMode('place');
-  setStatus(`「${file.name}」を読み込みました。床をタップすると置けます。`);
+  const heavy = model.triangles > HEAVY_TRIANGLES
+    ? `とても細かいモデル（約 ${Math.round(model.triangles / 10000)} 万ポリゴン）なので、たくさん置くと重くなるかも。`
+    : '';
+  setStatus(`「${file.name}」を読み込みました。床をタップすると置けます。${heavy}`);
   await storeRecord('put', record);
 }
 
