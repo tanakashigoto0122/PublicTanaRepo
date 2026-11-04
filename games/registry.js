@@ -51,4 +51,9 @@ export const games = [
     title: '3Dモデル軽量化',
     description: '3D モデルのポリゴンを減らし、テクスチャを小さくして、軽い .glb に書き出す。',
   },
+  {
+    id: 'mecha-blaster',
+    title: 'メカ・ブラスター',
+    description: '自分の 3D モデル（なければ仮のロボ）を動かして、60 秒で箱の塔を撃って崩すアクション。',
+  },
 ];
