@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ぶっ飛ばしチャレンジ</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <!-- Three.js と cannon-es はリポジトリに同梱したものを読み込む（CDN は使わない） -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../assets/vendor/three/build/three.module.js",
+        "three/addons/": "../../assets/vendor/three/examples/jsm/",
+        "cannon-es": "../../assets/vendor/cannon-es/dist/cannon-es.js"
+      }
+    }
+  </script>
+  <style>
+    .viewer {
+      position: relative;
+      width: 100%;
+      height: min(62svh, 520px);
+      min-height: 300px;
+      margin: 12px 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .viewer canvas { display: block; width: 100%; height: 100%; }
+    .hud {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .hud span { padding: 2px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); }
+    .power {
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
+      height: 10px;
+      border-radius: 5px;
+      background: var(--border);
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .power div { height: 100%; width: 0; background: var(--piece-z); }
+    .boost {
+      position: absolute;
+      right: 16px;
+      bottom: 28px;
+      width: 84px;
+      height: 84px;
+      border-radius: 50%;
+      padding: 0;
+      font-weight: 700;
+      background: var(--piece-o);
+      border-color: var(--piece-o);
+      color: var(--surface);
+      touch-action: none;
+    }
+    .boost[hidden] { display: none; }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      gap: 10px;
+      text-align: center;
+      padding: 16px;
+      background: color-mix(in srgb, var(--bg) 82%, transparent);
+    }
+    .overlay[hidden] { display: none; }
+    .overlay h2 { margin: 0; font-size: 1.6rem; }
+    .overlay p { margin: 0; }
+    .overlay button { justify-self: center; padding: 10px 28px; font-size: 1.1rem; font-weight: 700; background: var(--accent); border-color: var(--accent); color: var(--surface); }
+    .hint {
+      position: absolute;
+      left: 50%;
+      top: 44px;
+      transform: translateX(-50%);
+      padding: 4px 12px;
+      border-radius: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      font-size: 0.85rem;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .hint[hidden] { display: none; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .file-button { position: relative; overflow: hidden; }
+    .file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .bounce { display: grid; gap: 2px; flex: 1 1 100%; font-size: 0.9rem; }
+    .bounce input { width: 100%; accent-color: var(--accent); }
+    .bounce .value { color: var(--muted); }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.85rem; }
+    .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+    .legend .trampoline { background: var(--piece-i); }
+    .legend .boost-pad { background: var(--piece-o); }
+    .legend .mud { background: var(--piece-l); }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>ぶっ飛ばしチャレンジ</h1>
+    <p class="muted">画面を後ろ（左下）に引っぱって離すと、キャラクターが飛んでいく。止まったところまでの距離が記録。空中で 1 回だけブーストできる。</p>
+    <div class="viewer" id="viewer">
+      <div class="hud"><span id="distance">0.0 m</span><span id="best">ベスト 0.0 m</span></div>
+      <p class="hint" id="hint">← 後ろに引っぱって離す</p>
+      <div class="power"><div id="power"></div></div>
+      <button class="boost" id="boost" hidden>ブースト</button>
+      <div class="overlay" id="overlay" hidden>
+        <h2 id="result-title"></h2>
+        <p id="result-text"></p>
+        <button id="retry">もう一回</button>
+      </div>
+    </div>
+    <p class="status" id="status"></p>
+
+    <div class="row legend">
+      <span><i class="trampoline"></i>トランポリン（よく弾む）</span>
+      <span><i class="boost-pad"></i>加速パッド</span>
+      <span><i class="mud"></i>ぬかるみ（止まる）</span>
+    </div>
+    <div class="row">
+      <label class="bounce">キャラクターの弾み <span class="value" id="bounce-value"></span>
+        <input type="range" id="bounce" min="0" max="90" value="40">
+      </label>
+    </div>
+    <div class="row">
+      <button id="new-course">コースを作り直す</button>
+    </div>
+
+    <h2>キャラクター</h2>
+    <div class="row">
+      <label class="file-button">
+        <button type="button" tabindex="-1">自分のモデルを読み込む</button>
+        <input type="file" id="character-file" accept=".glb,.gltf,.obj,.stl">
+      </label>
+      <button id="turn">向きを回す</button>
+      <button id="default-character">仮のロボに戻す</button>
+    </div>
+    <p class="muted" id="character-name"></p>
+    <p class="muted">キャラクターは「メカ・ブラスター」と共通です（どちらかで読み込めば両方で使えます）。このブラウザの中にだけ保存され、どこにも送信されません。当たり判定は、モデルをラップで包んだような形です。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
