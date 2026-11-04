@@ -41,4 +41,9 @@ export const games = [
     title: '自分の3D積み木',
     description: 'やわらか積み木に、自分の 3D モデル（glb / obj / stl）を持ち込んで積み木として置ける。',
   },
+  {
+    id: 'dominoes',
+    title: 'ドミノ倒し',
+    description: '床を指でなぞってドミノを並べ、連鎖で全部倒す。うずまきやハートのお手本もある。',
+  },
 ];
