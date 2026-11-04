@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import {
@@ -219,7 +220,8 @@ async function parseFile(file, format) {
   const buffer = await file.arrayBuffer();
   if (format === 'glb' || format === 'gltf') {
     const data = format === 'gltf' ? new TextDecoder().decode(buffer) : buffer;
-    const gltf = await new GLTFLoader().parseAsync(data, '');
+    // gltfpack などで meshopt 圧縮した .glb も開けるようにする
+    const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(data, '');
     return { object: gltf.scene, custom: false, animations: gltf.animations };
   }
   if (format === 'obj') {

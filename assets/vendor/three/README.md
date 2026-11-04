@@ -10,6 +10,7 @@ examples/jsm/controls/OrbitControls.js, TransformControls.js
 examples/jsm/exporters/GLTFExporter.js
 examples/jsm/loaders/GLTFLoader.js, OBJLoader.js, STLLoader.js
 examples/jsm/math/ConvexHull.js
+examples/jsm/libs/meshopt_decoder.module.js   (gltfpack などで meshopt 圧縮した .glb を GLTFLoader で開くため。meshoptimizer、MIT)
 examples/jsm/utils/BufferGeometryUtils.js, SkeletonUtils.js   (GLTFLoader が使う)
 ```
 
