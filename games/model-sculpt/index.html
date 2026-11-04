@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ぐにゃぐにゃ工房</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <!-- Three.js はリポジトリに同梱したものを読み込む（CDN は使わない） -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../assets/vendor/three/build/three.module.js",
+        "three/addons/": "../../assets/vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+  <style>
+    .viewer {
+      width: 100%;
+      height: min(58svh, 500px);
+      min-height: 280px;
+      margin: 12px 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .viewer canvas { display: block; width: 100%; height: 100%; }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .tools { display: grid; grid-template-columns: repeat(5, 1fr); flex: 1 1 100%; }
+    .tools button { border-radius: 0; padding: 8px 0; font-size: 0.8rem; white-space: nowrap; }
+    .tools button:first-child { border-radius: 8px 0 0 8px; }
+    .tools button:last-child { border-radius: 0 8px 8px 0; }
+    .tools button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+    .hint { font-size: 0.85rem; margin: 0 0 8px; }
+    .settings {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px 16px;
+      padding: 12px;
+      margin-bottom: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .settings label { display: grid; gap: 2px; font-size: 0.9rem; }
+    .settings .value { color: var(--muted); }
+    .settings input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .settings .check { display: flex; align-items: center; gap: 6px; grid-column: 1 / -1; }
+    .file-button { position: relative; overflow: hidden; }
+    .file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+    button:disabled { opacity: 0.45; cursor: default; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>ぐにゃぐにゃ工房</h1>
+    <p class="muted">3D モデルを指で引っぱったり、ふくらませたり、ならしたりして改造する。何もないところをドラッグすると視点が回る。</p>
+    <div class="viewer" id="viewer"></div>
+    <p class="status" id="status"></p>
+
+    <div class="row">
+      <div class="tools" role="group" aria-label="道具">
+        <button data-tool="view" aria-pressed="false">見る</button>
+        <button data-tool="grab" aria-pressed="true">引っぱる</button>
+        <button data-tool="inflate" aria-pressed="false">ふくらます</button>
+        <button data-tool="deflate" aria-pressed="false">へこます</button>
+        <button data-tool="smooth" aria-pressed="false">ならす</button>
+      </div>
+    </div>
+    <p class="hint muted" id="hint"></p>
+    <div class="settings">
+      <label>ブラシの大きさ <span class="value" id="radius-value"></span><input type="range" id="radius" min="3" max="60" value="20"></label>
+      <label>強さ <span class="value" id="strength-value"></span><input type="range" id="strength" min="5" max="100" value="50"></label>
+      <label class="check"><input type="checkbox" id="elastic" checked> 引っぱって離したら戻る（ぷるん）</label>
+    </div>
+    <div class="row">
+      <button id="undo" disabled>元に戻す</button>
+      <button id="reset">最初の形に戻す</button>
+    </div>
+
+    <h2>モデル</h2>
+    <div class="row">
+      <label class="file-button">
+        <button type="button" tabindex="-1">3D モデルを読み込む</button>
+        <input type="file" id="file" accept=".glb,.gltf,.obj,.stl">
+      </label>
+      <button id="use-character">キャラクターを使う</button>
+      <button id="clay">粘土の玉</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="save-character">この形をキャラクターにする</button>
+      <button id="export">.glb で書き出す</button>
+    </div>
+    <p class="muted">「キャラクター」は、メカ・ブラスターとぶっ飛ばしチャレンジで使うモデルです。改造した形をキャラクターにすると、その 2 つのゲームでも使えます。モデルはこのブラウザの中にだけ保存され、どこにも送信されません。細かすぎるモデルは「3Dモデル軽量化」で軽くしてからのほうが、なめらかに動きます。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
