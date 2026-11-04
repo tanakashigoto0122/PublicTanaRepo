@@ -353,6 +353,13 @@ document.getElementById('new-course').addEventListener('click', () => {
   resetCharacter();
   setStatus('コースを作り直しました。');
 });
+document.getElementById('clear-best').addEventListener('click', () => {
+  best = 0;
+  saveBest();
+  placeFlag();
+  updateHud();
+  setStatus('ベスト記録を消しました。');
+});
 bounceEl.addEventListener('input', () => {
   groundContact.restitution = Number(bounceEl.value) / 100;
   document.getElementById('bounce-value').textContent = `${bounceEl.value}%`;
@@ -444,12 +451,13 @@ function setCharacter(object, record) {
   object.traverse((child) => {
     if (child.isMesh) child.castShadow = true;
   });
-  character = { object, custom: Boolean(record), record };
-  avatar.add(object);
-  // 当たり判定の形を作り直す（見た目と同じ形・同じ向き）
+  // 当たり判定の形は、見た目を avatar に入れる前に作る。入れた後だと、そのときの avatar の位置
+  // （発射台の上や前回の着地点）まで形に含まれてしまい、見た目と当たり判定がずれる
   while (characterBody.shapes.length > 0) characterBody.removeShape(characterBody.shapes[0]);
   const { shape, offset } = hullFromObject(object);
   characterBody.addShape(shape, offset);
+  character = { object, custom: Boolean(record), record };
+  avatar.add(object);
   characterBody.updateMassProperties();
   characterNameEl.textContent = record ? `いまのキャラクター：${record.name}` : 'いまのキャラクター：仮のロボ';
   if (state !== 'flying') resetCharacter();
