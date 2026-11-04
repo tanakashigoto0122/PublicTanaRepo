@@ -46,4 +46,9 @@ export const games = [
     title: 'ドミノ倒し',
     description: '床を指でなぞってドミノを並べ、連鎖で全部倒す。うずまきやハートのお手本もある。',
   },
+  {
+    id: 'model-lite',
+    title: '3Dモデル軽量化',
+    description: '3D モデルのポリゴンを減らし、テクスチャを小さくして、軽い .glb に書き出す。',
+  },
 ];
