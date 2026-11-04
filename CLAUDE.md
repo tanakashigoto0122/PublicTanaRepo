@@ -31,6 +31,9 @@ Never commit secrets, API keys, tokens, or personal data.
   `cannon-es` で読み込む。扱いのルール（`logic.js` から import しない、手で編集しない）も Three.js と同じ。
 - **例外: ポリゴン削減の meshoptimizer。** `assets/vendor/meshoptimizer/` に同梱し、importmap の
   `meshoptimizer/` で読み込む。扱いのルールは Three.js と同じ。
+- **例外: 手の検出の MediaPipe Tasks Vision。** `assets/vendor/mediapipe/` に本体・WebAssembly・手のモデルを同梱し、
+  importmap の `@mediapipe/tasks-vision` で読み込む。扱いのルールは Three.js と同じ。カメラの映像はブラウザの中だけで
+  処理し、送信しない。
 - **ロジックと描画を分ける。** 各ゲームの盤面・ルール・勝敗判定は DOM に触れない
   `logic.js` に純粋関数として書き、`main.js` は DOM の描画と入力処理だけを担う。
   `logic.js` は `tests/` から直接 import してテストする。
@@ -47,6 +50,7 @@ assets/style.css        全ページ共通のスタイル。色は :root の CSS
 assets/vendor/three/    同梱した Three.js（3D を使うページだけが読み込む）
 assets/vendor/cannon-es/ 同梱した物理エンジン cannon-es（物理積み木が読み込む）
 assets/vendor/meshoptimizer/ 同梱したポリゴン削減ライブラリ（3Dモデル軽量化が読み込む）
+assets/vendor/mediapipe/ 同梱した手の検出ライブラリとモデル（てのひら粘土が読み込む）
 games/registry.js       ゲーム一覧の登録先
 games/<id>/index.html   各ゲームのページ（ページ固有のスタイルは <style> に書く）
 games/<id>/logic.js     DOM に依存しないゲームロジック

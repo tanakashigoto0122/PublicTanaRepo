@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>てのひら粘土</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <!-- Three.js と MediaPipe はリポジトリに同梱したものを読み込む（CDN は使わない） -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../assets/vendor/three/build/three.module.js",
+        "three/addons/": "../../assets/vendor/three/examples/jsm/",
+        "@mediapipe/tasks-vision": "../../assets/vendor/mediapipe/vision_bundle.mjs"
+      }
+    }
+  </script>
+  <style>
+    .viewer {
+      position: relative;
+      width: 100%;
+      height: min(62svh, 540px);
+      min-height: 300px;
+      margin: 12px 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .viewer canvas { display: block; width: 100%; height: 100%; }
+    /* 自分が映っているカメラ映像（鏡のように左右反転） */
+    .preview {
+      position: absolute;
+      left: 8px;
+      bottom: 8px;
+      width: 28%;
+      max-width: 160px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      transform: scaleX(-1);
+      pointer-events: none;
+    }
+    .preview[hidden] { display: none; }
+    .badge {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      padding: 2px 10px;
+      border-radius: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      font-size: 0.85rem;
+      pointer-events: none;
+    }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .modes { display: inline-grid; grid-template-columns: 1fr 1fr; }
+    .modes button { border-radius: 0; }
+    .modes button:first-child { border-radius: 8px 0 0 8px; }
+    .modes button:last-child { border-radius: 0 8px 8px 0; }
+    .modes button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+    .primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+    .settings {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px 16px;
+      padding: 12px;
+      margin-bottom: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .settings label { display: grid; gap: 2px; font-size: 0.9rem; }
+    .settings .value { color: var(--muted); }
+    .settings input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .settings .check { display: flex; align-items: center; gap: 6px; grid-column: 1 / -1; }
+    .file-button { position: relative; overflow: hidden; }
+    .file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .hint { font-size: 0.85rem; margin: 0 0 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>てのひら粘土</h1>
+    <p class="muted">カメラに映した自分の手で、3D モデルをつまんで引っぱったり、手を押し付けてへこませたりする。カメラを使わないときは指で操作できる。</p>
+    <div class="viewer" id="viewer">
+      <span class="badge" id="badge">指で操作中</span>
+      <video class="preview" id="preview" playsinline muted hidden></video>
+    </div>
+    <p class="status" id="status"></p>
+
+    <div class="row">
+      <button class="primary" id="camera">カメラで手を使う</button>
+      <div class="modes" role="group" aria-label="手の使い方">
+        <button data-mode="pinch" aria-pressed="true">つまむ</button>
+        <button data-mode="press" aria-pressed="false">押す</button>
+      </div>
+    </div>
+    <p class="hint muted" id="hint"></p>
+    <div class="settings">
+      <label>つまむ範囲 <span class="value" id="radius-value"></span><input type="range" id="radius" min="5" max="60" value="25"></label>
+      <label>手の大きさ <span class="value" id="hand-size-value"></span><input type="range" id="hand-size" min="50" max="200" value="100"></label>
+      <label class="check"><input type="checkbox" id="elastic" checked> 離したら戻る（ぷるん）</label>
+      <label class="check"><input type="checkbox" id="show-preview" checked> カメラの映像を小さく表示</label>
+    </div>
+    <div class="row">
+      <button id="recalibrate">奥行きを合わせ直す</button>
+      <button id="reset">最初の形に戻す</button>
+    </div>
+
+    <h2>モデル</h2>
+    <div class="row">
+      <label class="file-button">
+        <button type="button" tabindex="-1">3D モデルを読み込む</button>
+        <input type="file" id="file" accept=".glb,.gltf,.obj,.stl">
+      </label>
+      <button id="use-character">キャラクターを使う</button>
+      <button id="clay">粘土の玉</button>
+    </div>
+    <div class="row">
+      <button id="save-character">この形をキャラクターにする</button>
+      <button id="export">.glb で書き出す</button>
+    </div>
+    <p class="muted">使い方：スマホを立てかけて、画面から 30〜60 cm くらい離れた所で手のひらをカメラに向けます。親指と人差し指をくっつけるとつまめます。「押す」では、スマホに手を近づけると画面の中の手が奥へ進み、モデルに手の形の跡が付きます。奥行きがずれたら「奥行きを合わせ直す」を押してください。</p>
+    <p class="muted">カメラの映像はこのブラウザの中だけで処理し、保存も送信もしません。手の検出には MediaPipe（Apache-2.0）を使っています。キャラクターはメカ・ブラスターなどと共通です。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
