@@ -1,12 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import {
   detectFormat, fitDistance, formatBytes, formatCount, formatDimensions, lightPosition,
 } from './logic.js';
+import { loadModel } from '../shared/models.js';
 
 const viewerEl = document.getElementById('viewer');
 const statusEl = document.getElementById('status');
@@ -217,28 +214,9 @@ function showSample(kind) {
 }
 
 async function parseFile(file, format) {
-  const buffer = await file.arrayBuffer();
-  if (format === 'glb' || format === 'gltf') {
-    const data = format === 'gltf' ? new TextDecoder().decode(buffer) : buffer;
-    // gltfpack などで meshopt 圧縮した .glb も開けるようにする
-    const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(data, '');
-    return { object: gltf.scene, custom: false, animations: gltf.animations };
-  }
-  if (format === 'obj') {
-    const object = new OBJLoader().parse(new TextDecoder().decode(buffer));
-    object.traverse((child) => {
-      if (child.isMesh) child.material = newMaterial();
-    });
-    return { object, custom: true };
-  }
-  const geometry = new STLLoader().parse(buffer);
-  geometry.computeVertexNormals();
-  // STL は Z 軸が上のことが多いので、Y 軸が上になるように起こす
-  const mesh = new THREE.Mesh(geometry, newMaterial());
-  mesh.rotation.x = -Math.PI / 2;
-  const group = new THREE.Group();
-  group.add(mesh);
-  return { object: group, custom: true };
+  const { object, animations } = await loadModel({ format, data: await file.arrayBuffer() }, { material: newMaterial, stlNormals: true });
+  // glTF は自分の材質を持つので、色や光沢のスライダーは obj / stl にだけ効かせる
+  return { object, custom: format !== 'glb' && format !== 'gltf', animations };
 }
 
 async function openFile(file) {

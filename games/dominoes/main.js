@@ -6,6 +6,7 @@ import {
   zigzagPath,
 } from './logic.js';
 import { fitDistance } from '../model-viewer/logic.js';
+import { cssValue } from '../shared/theme.js';
 
 const STEP = 1 / 60;
 const DOMINO_MASS = 0.15;
@@ -35,10 +36,6 @@ const spacingEl = document.getElementById('spacing');
 const modeButtons = [...document.querySelectorAll('[data-mode]')];
 
 // 色は style.css の CSS 変数から読む（ダークモードの切り替えにも追従する）
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 // ---- 3D 表示 ----
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });

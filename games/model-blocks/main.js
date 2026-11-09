@@ -1,9 +1,5 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { ConvexHull } from 'three/addons/math/ConvexHull.js';
 import * as CANNON from 'cannon-es';
 import {
@@ -13,6 +9,9 @@ import {
   pairHardness, partLayout, placePieces, quantizeHardness, removeGlue, restitution, setAllStiffness,
   setStiffnessOf, strideIndices,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
+import { parseModel, plainMaterial } from '../shared/models.js';
+import { objectStore } from '../shared/storage.js';
 
 const STEP = 1 / 60;
 // タップと判定する指の移動量（ピクセル）。これより動いたらドラッグとみなす
@@ -35,8 +34,6 @@ const HINTS = {
 const MAX_MODEL_OBJECTS = 30;
 // 持ち込んだモデルを置くとき、床から浮かせる高さ
 const MODEL_GAP = 0.5;
-const DB_NAME = 'mini-games-model-blocks';
-const DB_STORE = 'models';
 // これより細かいモデルは、たくさん置くとスマホでは重くなりやすいので、読み込んだときに知らせる
 const HEAVY_TRIANGLES = 300000;
 
@@ -58,10 +55,6 @@ const sliders = {
 };
 
 // 色は style.css の CSS 変数から読む（ダークモードの切り替えにも追従する）
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 // ---- 3D 表示 ----
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -393,31 +386,6 @@ const modelLibrary = new Map();
 const shapeCache = new Map();
 let storageAvailable = true;
 
-async function parseModel({ format, data }) {
-  if (format === 'glb' || format === 'gltf') {
-    // gltfpack などで meshopt 圧縮した .glb も開けるようにする
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    const gltf = await loader.parseAsync(format === 'gltf' ? new TextDecoder().decode(data) : data, '');
-    return gltf.scene;
-  }
-  const material = () => new THREE.MeshStandardMaterial({ color: cssValue('--piece-j'), side: THREE.DoubleSide });
-  if (format === 'obj') {
-    const object = new OBJLoader().parse(new TextDecoder().decode(data));
-    object.traverse((child) => {
-      if (child.isMesh) child.material = material();
-    });
-    return object;
-  }
-  const geometry = new STLLoader().parse(data);
-  geometry.computeVertexNormals();
-  // STL は Z 軸が上のことが多いので、Y 軸が上になるように起こす
-  const mesh = new THREE.Mesh(geometry, material());
-  mesh.rotation.x = -Math.PI / 2;
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
 // モデルを、一番長い辺が 1・外枠の中心が原点になるようにそろえ、当たり判定に使う点を選んでおく
 function prepareModel(record, object) {
   const box = new THREE.Box3().setFromObject(object);
@@ -542,29 +510,7 @@ function spawnModel(modelId, point, yaw) {
 
 // ---- 持ち込んだモデルの保存（このブラウザの IndexedDB だけに保存し、どこにも送らない） ----
 
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE, { keyPath: 'id' });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function withStore(mode, action) {
-  const db = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(DB_STORE, mode);
-      const request = action(transaction.objectStore(DB_STORE));
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-  } finally {
-    db.close();
-  }
-}
+const withStore = objectStore('mini-games-model-blocks', 'models', { keyPath: 'id' });
 
 async function storeRecord(action, value) {
   if (!storageAvailable) return;
@@ -617,7 +563,7 @@ function renderLibrary() {
 }
 
 async function addToLibrary(record) {
-  const model = prepareModel(record, await parseModel(record));
+  const model = prepareModel(record, await parseModel(record, { material: () => plainMaterial({ side: THREE.DoubleSide }), stlNormals: true }));
   modelLibrary.set(record.id, model);
   renderLibrary();
   return model;

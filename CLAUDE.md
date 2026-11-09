@@ -39,6 +39,10 @@ Never commit secrets, API keys, tokens, or personal data.
   `logic.js` は `tests/` から直接 import してテストする。
   ほかのゲームと同じ処理は、コピーせずにそのゲームの `logic.js` から import してよい
   （例: `soft-blocks/logic.js` は `physics-blocks/logic.js` の形や接着の処理を使う）。
+- **ゲームをまたいで使う描画側の部品は `games/shared/` に置く。** 3D モデルの読み込み（`models.js`）、
+  このブラウザの IndexedDB への保存と共通キャラクター（`storage.js`）、手の検出の準備（`hands.js`）、
+  CSS 変数の読み取り（`theme.js`）。`main.js` で同じ処理が要るときはコピーせずにここから import する。
+  `games/shared/logic.js` は DOM に依存しない部分で、`tests/shared.test.js` でテストする。
 - **トップページは `games/registry.js` から一覧を生成する。** ゲームを追加したら必ず登録する。
   `tests/registry.test.js` が登録内容とディレクトリの対応を検証する。
 
@@ -52,6 +56,7 @@ assets/vendor/cannon-es/ 同梱した物理エンジン cannon-es（物理積み
 assets/vendor/meshoptimizer/ 同梱したポリゴン削減ライブラリ（3Dモデル軽量化が読み込む）
 assets/vendor/mediapipe/ 同梱した手の検出ライブラリとモデル（てのひら粘土が読み込む）
 games/registry.js       ゲーム一覧の登録先
+games/shared/           ゲームをまたいで使う部品（ゲームではないので registry には登録しない）
 games/<id>/index.html   各ゲームのページ（ページ固有のスタイルは <style> に書く）
 games/<id>/logic.js     DOM に依存しないゲームロジック
 games/<id>/main.js      描画と入力処理

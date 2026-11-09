@@ -6,6 +6,7 @@ import {
   dropPosition, glueKey, gravityY, hasGlue, jointParams, massOf, newGluePairs, pairHardness, partLayout,
   placePieces, quantizeHardness, removeGlue, restitution, setAllStiffness, setStiffnessOf,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
 
 const STEP = 1 / 60;
 // タップと判定する指の移動量（ピクセル）。これより動いたらドラッグとみなす
@@ -43,10 +44,6 @@ const sliders = {
 };
 
 // 色は style.css の CSS 変数から読む（ダークモードの切り替えにも追従する）
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 // ---- 3D 表示 ----
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });

@@ -1,19 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import {
   HAND_BONES, INDEX_TIP, LANDMARK_COUNT, THUMB_TIP, applyOffset, brushWeights, customName, detectFormat,
   fillZeroNormals, guessFacing, handToWorld, midpoint, nearestVertex, palmSize, pushOut, smoothPoints, springStep,
   springVector, toFloatArray, updatePinch, vectorLength,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
+import { createHandLandmarker } from '../shared/hands.js';
+import { clayBall, parseModel } from '../shared/models.js';
+import { readCharacter, writeCharacter } from '../shared/storage.js';
 
+// キャラクターがないときの粘土の玉の細かさ
+const CLAY_BALL = { segments: [160, 120], roughness: 0.6 };
 const MODEL_HEIGHT = 2;
-const MEDIAPIPE = new URL('../../assets/vendor/mediapipe/', import.meta.url).href;
 // つまんだ所から、これより遠くにしか頂点がなければ何もつかまない
 const GRAB_REACH = 0.35;
 // 関節の球の半径（画面の幅に対する割合。手の大きさのスライダーで変わる）
@@ -21,8 +21,6 @@ const JOINT_RADIUS = 0.028;
 // 手が見えなくなってからこれだけ経ってまた見えたら、そのときの大きさを奥行きの基準にし直す（秒）
 const RECALIBRATE_AFTER = 0.6;
 const SPRING_EPSILON = 1e-4;
-const DB_NAME = 'mini-games-mecha-blaster';
-const DB_STORE = 'character';
 const HINTS = {
   pinch: 'カメラ：親指と人差し指をくっつけてつまみ、そのまま手を動かす。指：モデルをつかんでドラッグ。',
   press: 'カメラ：スマホに手を近づけると、手が奥へ進んでモデルに手の形の跡が付く。指：モデルを押すとへこむ。',
@@ -38,10 +36,6 @@ const handSizeEl = document.getElementById('hand-size');
 const elasticEl = document.getElementById('elastic');
 const showPreviewEl = document.getElementById('show-preview');
 const modeButtons = [...document.querySelectorAll('[data-mode]')];
-
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -143,33 +137,6 @@ function refresh(part) {
 
 function snapshot() {
   return model.parts.map((part) => part.positions.slice());
-}
-
-function clayBall() {
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 160, 120), new THREE.MeshStandardMaterial({ color: cssValue('--piece-l'), roughness: 0.6 }));
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
-async function parseModel({ format, data }) {
-  if (format === 'glb' || format === 'gltf') {
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    return (await loader.parseAsync(format === 'gltf' ? new TextDecoder().decode(data) : data, '')).scene;
-  }
-  const material = () => new THREE.MeshStandardMaterial({ color: cssValue('--piece-j'), roughness: 0.5 });
-  if (format === 'obj') {
-    const object = new OBJLoader().parse(new TextDecoder().decode(data));
-    object.traverse((child) => {
-      if (child.isMesh) child.material = material();
-    });
-    return object;
-  }
-  const mesh = new THREE.Mesh(new STLLoader().parse(data), material());
-  mesh.rotation.x = -Math.PI / 2;
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
 }
 
 async function loadRecord(record) {
@@ -334,22 +301,6 @@ function visibleView() {
   return { width: height * camera.aspect, height, centerY: controls.target.y };
 }
 
-async function createLandmarker() {
-  const fileset = await FilesetResolver.forVisionTasks(`${MEDIAPIPE}wasm`);
-  const options = (delegate) => ({
-    baseOptions: { modelAssetPath: `${MEDIAPIPE}models/hand_landmarker.task`, delegate },
-    runningMode: 'VIDEO',
-    numHands: 2,
-  });
-  try {
-    return await HandLandmarker.createFromOptions(fileset, options('GPU'));
-  } catch (error) {
-    // GPU が使えない端末では CPU で動かす
-    console.warn(error);
-    return HandLandmarker.createFromOptions(fileset, options('CPU'));
-  }
-}
-
 async function startCamera() {
   cameraEl.disabled = true;
   setStatus('カメラと手の検出を準備中…（初回は数秒かかります）');
@@ -357,7 +308,7 @@ async function startCamera() {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
     previewEl.srcObject = stream;
     await previewEl.play();
-    landmarker ??= await createLandmarker();
+    landmarker ??= await createHandLandmarker();
   } catch (error) {
     console.warn(error);
     stopCamera();
@@ -544,33 +495,10 @@ renderer.domElement.addEventListener('pointercancel', endTouch);
 
 // ---- 保存（キャラクターはこのブラウザの IndexedDB だけに保存し、どこにも送らない） ----
 
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function withStore(storeMode, action) {
-  const db = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(DB_STORE, storeMode);
-      const request = action(transaction.objectStore(DB_STORE));
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-    });
-  } finally {
-    db.close();
-  }
-}
-
 async function useCharacter({ quiet = false } = {}) {
   try {
-    const record = await withStore('readonly', (store) => store.get('current'));
-    if (record?.data instanceof ArrayBuffer && detectFormat(record.name)) {
+    const record = await readCharacter();
+    if (record) {
       await loadRecord(record);
       setStatus(`キャラクター（${record.name}）を読み込みました。`);
       return;
@@ -608,14 +536,14 @@ document.getElementById('file').addEventListener('change', async (event) => {
 });
 document.getElementById('use-character').addEventListener('click', () => useCharacter());
 document.getElementById('clay').addEventListener('click', () => {
-  setModel(prepareModel(clayBall(), 'clay', 0));
+  setModel(prepareModel(clayBall(CLAY_BALL), 'clay', 0));
   setStatus('粘土の玉にしました。');
 });
 document.getElementById('save-character').addEventListener('click', async () => {
   try {
     const data = await exportGlb();
     const record = { name: customName(model.name), format: 'glb', data, facing: model.facing };
-    await withStore('readwrite', (store) => store.put(record, 'current'));
+    await writeCharacter(record);
     setStatus(`「${record.name}」をキャラクターにしました。`);
   } catch (error) {
     console.warn(error);
@@ -704,7 +632,7 @@ applyTheme();
 resetView();
 updateLabels();
 document.getElementById('hint').textContent = HINTS[mode];
-setModel(prepareModel(clayBall(), 'clay', 0));
+setModel(prepareModel(clayBall(CLAY_BALL), 'clay', 0));
 useCharacter({ quiet: true });
 const clock = new THREE.Timer();
 renderer.setAnimationLoop((time) => {

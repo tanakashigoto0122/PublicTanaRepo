@@ -1,14 +1,13 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import * as CANNON from 'cannon-es';
 import {
   ARENA_HALF, CHARACTER_HEIGHT, CRATE_SIZE, GAME_SECONDS, characterScale, detectFormat, finalScore, formatTime,
   guessFacing, headingOf, isKnocked, joystickVector, keyboardVector, moveVelocity, towerLayout, turnTowards,
   wrapAngle,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
+import { parseModel } from '../shared/models.js';
+import { readCharacter, writeCharacter } from '../shared/storage.js';
 
 const STEP = 1 / 60;
 const MOVE_SPEED = 6;
@@ -21,8 +20,6 @@ const SHOT_INTERVAL = 0.18;
 const SHOT_LIFETIME = 1.5;
 const PLAYER_MASS = 8;
 const BEST_KEY = 'mini-games:mecha-blaster:best';
-const DB_NAME = 'mini-games-mecha-blaster';
-const DB_STORE = 'character';
 const PALETTE = ['--piece-z', '--piece-l', '--piece-o', '--piece-s', '--piece-i', '--piece-j', '--piece-t'];
 
 const viewerEl = document.getElementById('viewer');
@@ -34,10 +31,6 @@ const overlayEl = document.getElementById('overlay');
 const stickEl = document.getElementById('stick');
 const knobEl = document.getElementById('knob');
 const characterNameEl = document.getElementById('character-name');
-
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -503,30 +496,8 @@ function setCharacter(object, record) {
   characterNameEl.textContent = record ? `いまのキャラクター：${record.name}` : 'いまのキャラクター：仮のロボ';
 }
 
-async function parseModel({ format, data }) {
-  if (format === 'glb' || format === 'gltf') {
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    return (await loader.parseAsync(format === 'gltf' ? new TextDecoder().decode(data) : data, '')).scene;
-  }
-  const material = () => new THREE.MeshStandardMaterial({ color: cssValue('--piece-j'), roughness: 0.45 });
-  if (format === 'obj') {
-    const object = new OBJLoader().parse(new TextDecoder().decode(data));
-    object.traverse((child) => {
-      if (child.isMesh) child.material = material();
-    });
-    return object;
-  }
-  const geometry = new STLLoader().parse(data);
-  geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, material());
-  mesh.rotation.x = -Math.PI / 2;
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
 async function useRecord(record) {
-  const object = await parseModel(record);
+  const object = await parseModel(record, { stlNormals: true });
   if (record.facing === undefined) {
     record.facing = guessFacing(new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3()).toArray());
   }
@@ -535,32 +506,9 @@ async function useRecord(record) {
 
 // ---- キャラクターの保存（このブラウザの IndexedDB だけに保存し、どこにも送らない） ----
 
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function withStore(mode, action) {
-  const db = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(DB_STORE, mode);
-      const request = action(transaction.objectStore(DB_STORE));
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-    });
-  } finally {
-    db.close();
-  }
-}
-
 async function saveCharacter(record) {
   try {
-    await withStore('readwrite', (store) => (record ? store.put(record, 'current') : store.delete('current')));
+    await writeCharacter(record);
   } catch (error) {
     console.warn(error);
     setStatus('このブラウザには保存できないので、キャラクターはページを閉じると元に戻ります。');
@@ -569,8 +517,8 @@ async function saveCharacter(record) {
 
 async function loadSavedCharacter() {
   try {
-    const record = await withStore('readonly', (store) => store.get('current'));
-    if (record?.data instanceof ArrayBuffer && detectFormat(record.name)) await useRecord(record);
+    const record = await readCharacter();
+    if (record) await useRecord(record);
   } catch (error) {
     console.warn(error);
   }
