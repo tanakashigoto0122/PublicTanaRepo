@@ -1,24 +1,23 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import {
   MODEL_HEIGHT, applyOffset, brushWeights, customName, detectFormat, fillZeroNormals, groupByPosition, groupedNormals,
   inflate,
   pushHistory, smooth, springStep, toFloatArray,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
+import { clayBall, parseModel } from '../shared/models.js';
+import { readCharacter, writeCharacter } from '../shared/storage.js';
 
 // ふくらます・へこますの速さ（1 秒あたり、モデルの高さに対する割合。強さ 100% のとき）
+// キャラクターがないときの粘土の玉の細かさ
+const CLAY_BALL = { segments: [160, 120], roughness: 0.6 };
 const INFLATE_RATE = 0.25;
 const SMOOTH_RATE = 6;
 // 離したあとの揺れが、これより小さくなったら止める
 const SPRING_EPSILON = 1e-4;
 // キャラクターはメカ・ブラスターとぶっ飛ばしチャレンジと同じ場所に保存する
-const DB_NAME = 'mini-games-mecha-blaster';
-const DB_STORE = 'character';
 const HINTS = {
   view: '1 本指で回す、2 本指で拡大・移動。モデルにさわっても形は変わらない。',
   grab: 'モデルの好きな所をつかんで引っぱる。何もない所のドラッグは視点の回転。',
@@ -35,10 +34,6 @@ const strengthEl = document.getElementById('strength');
 const elasticEl = document.getElementById('elastic');
 const undoEl = document.getElementById('undo');
 const toolButtons = [...document.querySelectorAll('[data-tool]')];
-
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -128,34 +123,6 @@ function resetView() {
   camera.position.set(2.2, 1.8, 3.6);
   controls.target.set(0, MODEL_HEIGHT / 2, 0);
   controls.update();
-}
-
-function clayBall() {
-  const geometry = new THREE.SphereGeometry(1, 160, 120);
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: cssValue('--piece-l'), roughness: 0.6 }));
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
-async function parseModel({ format, data }) {
-  if (format === 'glb' || format === 'gltf') {
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    return (await loader.parseAsync(format === 'gltf' ? new TextDecoder().decode(data) : data, '')).scene;
-  }
-  const material = () => new THREE.MeshStandardMaterial({ color: cssValue('--piece-j'), roughness: 0.5 });
-  if (format === 'obj') {
-    const object = new OBJLoader().parse(new TextDecoder().decode(data));
-    object.traverse((child) => {
-      if (child.isMesh) child.material = material();
-    });
-    return object;
-  }
-  const mesh = new THREE.Mesh(new STLLoader().parse(data), material());
-  mesh.rotation.x = -Math.PI / 2;
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
 }
 
 // ---- 形の変更 ----
@@ -363,37 +330,14 @@ function updateLabels() {
 
 // ---- 保存（キャラクターはこのブラウザの IndexedDB だけに保存し、どこにも送らない） ----
 
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function withStore(mode, action) {
-  const db = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(DB_STORE, mode);
-      const request = action(transaction.objectStore(DB_STORE));
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-    });
-  } finally {
-    db.close();
-  }
-}
-
 async function loadRecord(record) {
   setModel(prepareModel(await parseModel(record), record.name, record.facing));
 }
 
 async function useCharacter({ quiet = false } = {}) {
   try {
-    const record = await withStore('readonly', (store) => store.get('current'));
-    if (record?.data instanceof ArrayBuffer && detectFormat(record.name)) {
+    const record = await readCharacter();
+    if (record) {
       await loadRecord(record);
       setStatus(`キャラクター（${record.name}）を読み込みました。`);
       return true;
@@ -435,7 +379,7 @@ document.getElementById('file').addEventListener('change', async (event) => {
 });
 document.getElementById('use-character').addEventListener('click', () => useCharacter());
 document.getElementById('clay').addEventListener('click', () => {
-  setModel(prepareModel(clayBall(), 'clay', 0));
+  setModel(prepareModel(clayBall(CLAY_BALL), 'clay', 0));
   setStatus('粘土の玉にしました。');
 });
 document.getElementById('save-character').addEventListener('click', async () => {
@@ -443,7 +387,7 @@ document.getElementById('save-character').addEventListener('click', async () => 
   try {
     const data = await exportGlb();
     const record = { name: customName(model.name), format: 'glb', data, facing: model.facing };
-    await withStore('readwrite', (store) => store.put(record, 'current'));
+    await writeCharacter(record);
     setStatus(`「${record.name}」をキャラクターにしました。メカ・ブラスターやぶっ飛ばしチャレンジで使えます。`);
   } catch (error) {
     console.warn(error);
@@ -498,7 +442,7 @@ resize();
 applyTheme();
 setTool('grab');
 updateLabels();
-setModel(prepareModel(clayBall(), 'clay', 0));
+setModel(prepareModel(clayBall(CLAY_BALL), 'clay', 0));
 useCharacter({ quiet: true });
 const clock = new THREE.Timer();
 renderer.setAnimationLoop((time) => {

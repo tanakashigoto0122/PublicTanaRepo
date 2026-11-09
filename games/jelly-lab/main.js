@@ -1,14 +1,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import {
   MODEL_HEIGHT, addVelocity, averageSpacing, bindVertices, createBody, deformVertices, detectFormat,
   farthestPointSample, guessFacing, stepBody, stiffnessFromSoftness, strideIndices, toFloatArray, translateBody,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
+import { clayBall, parseModel } from '../shared/models.js';
+import { readCharacter } from '../shared/storage.js';
 
+// キャラクターがないときの粘土の玉の細かさ
+const CLAY_BALL = { segments: [96, 64], roughness: 0.4 };
 const PARTICLE_COUNT = 200;
 // まとまりの半径（粒の平均の間隔に対する倍率）。大きいほど広い範囲がいっしょに動く
 const CLUSTER_SCALE = 2.5;
@@ -19,17 +20,11 @@ const GRAB_RADIUS = 0.15;
 const DROP_HEIGHT = 3;
 const JUMP_SPEED = 6;
 const WALL = 4;
-const DB_NAME = 'mini-games-mecha-blaster';
-const DB_STORE = 'character';
 
 const viewerEl = document.getElementById('viewer');
 const statusEl = document.getElementById('status');
 const softnessEl = document.getElementById('softness');
 const bounceEl = document.getElementById('bounce');
-
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -120,65 +115,16 @@ function setModel(next) {
   grab = null;
 }
 
-function clayBall() {
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), new THREE.MeshStandardMaterial({ color: cssValue('--piece-l'), roughness: 0.4 }));
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
-async function parseModel({ format, data }) {
-  if (format === 'glb' || format === 'gltf') {
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    return (await loader.parseAsync(format === 'gltf' ? new TextDecoder().decode(data) : data, '')).scene;
-  }
-  const material = () => new THREE.MeshStandardMaterial({ color: cssValue('--piece-j'), roughness: 0.5 });
-  if (format === 'obj') {
-    const object = new OBJLoader().parse(new TextDecoder().decode(data));
-    object.traverse((child) => {
-      if (child.isMesh) child.material = material();
-    });
-    return object;
-  }
-  const mesh = new THREE.Mesh(new STLLoader().parse(data), material());
-  mesh.rotation.x = -Math.PI / 2;
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
 async function loadRecord(record) {
   const object = await parseModel(record);
   const facing = record.facing ?? guessFacing(new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3()).toArray());
   setModel(prepareModel(object, facing));
 }
 
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function readCharacter() {
-  const db = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const request = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get('current');
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  } finally {
-    db.close();
-  }
-}
-
 async function useCharacter({ quiet = false } = {}) {
   try {
     const record = await readCharacter();
-    if (record?.data instanceof ArrayBuffer && detectFormat(record.name)) {
+    if (record) {
       await loadRecord(record);
       setStatus(`キャラクター（${record.name}）がぷるぷるになりました。`);
       return;
@@ -296,7 +242,7 @@ document.getElementById('file').addEventListener('change', async (event) => {
 });
 document.getElementById('use-character').addEventListener('click', () => useCharacter());
 document.getElementById('clay').addEventListener('click', () => {
-  setModel(prepareModel(clayBall(), 0));
+  setModel(prepareModel(clayBall(CLAY_BALL), 0));
   setStatus('粘土の玉にしました。');
 });
 for (const el of [softnessEl, bounceEl]) el.addEventListener('input', updateLabels);
@@ -337,7 +283,7 @@ updateLabels();
 camera.position.set(0, 2.6, 6.5);
 controls.target.set(0, 1, 0);
 controls.update();
-setModel(prepareModel(clayBall(), 0));
+setModel(prepareModel(clayBall(CLAY_BALL), 0));
 useCharacter({ quiet: true });
 
 const clock = new THREE.Timer();

@@ -6,6 +6,7 @@ import {
   addShape, createHistory, createSampleScene, createScene, deserialize, duplicateShape, findShape,
   record, redo, removeShape, serialize, undo, updateShape,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
 
 const SAVE_KEY = 'mini-games:block-builder:scene';
 const KIND_NAMES = { box: '箱', sphere: '球', cylinder: '円柱', cone: '円すい', torus: 'ドーナツ' };
@@ -39,10 +40,6 @@ const info = {
 };
 
 // 色は style.css の CSS 変数から読む（ダークモードの切り替えにも追従する）
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 viewerEl.append(renderer.domElement);

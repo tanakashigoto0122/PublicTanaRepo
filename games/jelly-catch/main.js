@@ -1,16 +1,17 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import {
   GAME_SECONDS, HAND_BONES, INDEX_TIP, JELLY_HEIGHT, LANDMARK_COUNT, TARGET_RADIUS, THUMB_TIP, WALL, averageSpacing,
-  bindVertices, bodySummary, createBody, deformVertices, detectFormat, farthestPointSample, formatTime, grabMembers,
+  bindVertices, bodySummary, createBody, deformVertices, farthestPointSample, formatTime, grabMembers,
   guessFacing, handToWorld, isOnTarget, midpoint, palmSize, placeTarget, smoothPoints, stepBody,
   stiffnessFromSoftness, strideIndices, toFloatArray, translateBody, updatePinch,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
+import { createHandLandmarker } from '../shared/hands.js';
+import { clayBall, parseModel } from '../shared/models.js';
+import { readCharacter } from '../shared/storage.js';
 
+// キャラクターがないときの粘土の玉の細かさ
+const CLAY_BALL = { segments: [64, 48], roughness: 0.4 };
 const PARTICLE_COUNT = 150;
 const CLUSTER_SCALE = 2.5;
 const STEP = 1 / 120;
@@ -21,9 +22,6 @@ const GRAB_REACH = 0.5;
 const START_POSITION = [0, 2.5, 0.8];
 const RECALIBRATE_AFTER = 0.6;
 const BEST_KEY = 'mini-games:jelly-catch:best';
-const MEDIAPIPE = new URL('../../assets/vendor/mediapipe/', import.meta.url).href;
-const DB_NAME = 'mini-games-mecha-blaster';
-const DB_STORE = 'character';
 
 const viewerEl = document.getElementById('viewer');
 const statusEl = document.getElementById('status');
@@ -31,10 +29,6 @@ const overlayEl = document.getElementById('overlay');
 const previewEl = document.getElementById('preview');
 const cameraEl = document.getElementById('camera');
 const softnessEl = document.getElementById('softness');
-
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -170,59 +164,10 @@ function placeAtStart() {
   translateBody(body, START_POSITION);
 }
 
-function clayBall() {
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48), new THREE.MeshStandardMaterial({ color: cssValue('--piece-l'), roughness: 0.4 }));
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
-async function parseModel({ format, data }) {
-  if (format === 'glb' || format === 'gltf') {
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    return (await loader.parseAsync(format === 'gltf' ? new TextDecoder().decode(data) : data, '')).scene;
-  }
-  const material = () => new THREE.MeshStandardMaterial({ color: cssValue('--piece-j'), roughness: 0.5 });
-  if (format === 'obj') {
-    const object = new OBJLoader().parse(new TextDecoder().decode(data));
-    object.traverse((child) => {
-      if (child.isMesh) child.material = material();
-    });
-    return object;
-  }
-  const mesh = new THREE.Mesh(new STLLoader().parse(data), material());
-  mesh.rotation.x = -Math.PI / 2;
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function readCharacter() {
-  const db = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const request = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get('current');
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  } finally {
-    db.close();
-  }
-}
-
 async function useCharacter({ quiet = false } = {}) {
   try {
     const record = await readCharacter();
-    if (record?.data instanceof ArrayBuffer && detectFormat(record.name)) {
+    if (record) {
       const object = await parseModel(record);
       const facing = record.facing ?? guessFacing(new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3()).toArray());
       setJelly(prepareJelly(object, facing));
@@ -324,20 +269,7 @@ async function startCamera() {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
     previewEl.srcObject = stream;
     await previewEl.play();
-    if (!landmarker) {
-      const fileset = await FilesetResolver.forVisionTasks(`${MEDIAPIPE}wasm`);
-      const options = (delegate) => ({
-        baseOptions: { modelAssetPath: `${MEDIAPIPE}models/hand_landmarker.task`, delegate },
-        runningMode: 'VIDEO',
-        numHands: 2,
-      });
-      try {
-        landmarker = await HandLandmarker.createFromOptions(fileset, options('GPU'));
-      } catch (error) {
-        console.warn(error);
-        landmarker = await HandLandmarker.createFromOptions(fileset, options('CPU'));
-      }
-    }
+    landmarker ??= await createHandLandmarker();
   } catch (error) {
     console.warn(error);
     stopCamera();
@@ -496,7 +428,7 @@ document.getElementById('start').addEventListener('click', startGame);
 cameraEl.addEventListener('click', () => (stream ? stopCamera() : startCamera()));
 document.getElementById('use-character').addEventListener('click', () => useCharacter());
 document.getElementById('clay').addEventListener('click', () => {
-  setJelly(prepareJelly(clayBall(), 0));
+  setJelly(prepareJelly(clayBall(CLAY_BALL), 0));
   setStatus('粘土の玉で遊びます。');
 });
 softnessEl.addEventListener('input', () => {
@@ -548,7 +480,7 @@ applyTheme();
 softnessEl.dispatchEvent(new Event('input'));
 targetMesh.position.set(target[0], 0.004, target[1]);
 updateHud();
-setJelly(prepareJelly(clayBall(), 0));
+setJelly(prepareJelly(clayBall(CLAY_BALL), 0));
 useCharacter({ quiet: true });
 
 const clock = new THREE.Timer();

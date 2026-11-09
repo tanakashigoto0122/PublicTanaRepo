@@ -1,16 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/meshopt_simplifier.js';
 import {
   TEXTURE_SIZES, compactIndices, detectFormat, fitDistance, formatBytes, formatCount, normalizeVectors, outputName, percentOf,
   ratioFromSlider, remapAttribute, sliderFromRatio, targetIndexCount, textureSizeLabel,
 } from './logic.js';
+import { cssValue } from '../shared/theme.js';
+import { parseModel } from '../shared/models.js';
 
 // 減らすときに許す形のずれ（モデルの大きさに対する割合）。大きめにして、指定した割合まで確実に減らす
 const TARGET_ERROR = 1;
@@ -32,10 +30,6 @@ const cells = Object.fromEntries(
     [`after-${key}`, document.getElementById(`after-${key}`)],
   ]),
 );
-
-function cssValue(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -183,30 +177,6 @@ function updateRatioLabel() {
 
 // ---- 読み込み ----
 
-async function parseModel(format, buffer) {
-  if (format === 'glb' || format === 'gltf') {
-    // gltfpack などで meshopt 圧縮した .glb も開けるようにする
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    const gltf = await loader.parseAsync(format === 'gltf' ? new TextDecoder().decode(buffer) : buffer, '');
-    return gltf.scene;
-  }
-  const material = () => new THREE.MeshStandardMaterial({ color: cssValue('--piece-j') });
-  if (format === 'obj') {
-    const object = new OBJLoader().parse(new TextDecoder().decode(buffer));
-    object.traverse((child) => {
-      if (child.isMesh) child.material = material();
-    });
-    return object;
-  }
-  const geometry = new STLLoader().parse(buffer);
-  // STL は Z 軸が上のことが多いので、Y 軸が上になるように起こす
-  const mesh = new THREE.Mesh(geometry, material());
-  mesh.rotation.x = -Math.PI / 2;
-  const group = new THREE.Group();
-  group.add(mesh);
-  return group;
-}
-
 function setOriginal(object, name, bytes) {
   for (const m of [original, lite]) if (m) scene.remove(m.object);
   original = { object, name, bytes, stats: measure(object) };
@@ -229,7 +199,7 @@ async function openFile(file) {
   setStatus(`「${file.name}」を読み込み中…`);
   await nextFrame();
   try {
-    setOriginal(await parseModel(format, await file.arrayBuffer()), file.name, file.size);
+    setOriginal(await parseModel({ format, data: await file.arrayBuffer() }), file.name, file.size);
     setStatus(`「${file.name}」を読み込みました。割合を決めて「軽量化する」を押してね。`);
   } catch (error) {
     console.warn(error);
