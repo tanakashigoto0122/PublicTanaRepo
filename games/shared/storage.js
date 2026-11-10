@@ -1,5 +1,5 @@
 // このブラウザの IndexedDB に保存する部品。どこにも送らない。
-import { isCharacterRecord } from './logic.js';
+import { LIBRARY_PREFIX, isCharacterRecord, libraryKey, newCharacterId, sortCharacters } from './logic.js';
 
 // 1 つのストアだけを持つデータベースを開き、action(store) の結果を返す
 export function objectStore(dbName, storeName, storeOptions) {
@@ -37,7 +37,50 @@ export async function readCharacter() {
   return isCharacterRecord(record) ? record : null;
 }
 
-// null を渡すとキャラクターを消す
+// いま使うキャラクターにする。保存した一覧にも入れる（id がなければ新しく付ける）。
+// null を渡すと、いまのキャラクターを外す（一覧には残る）
 export async function writeCharacter(record) {
-  await withCharacterStore('readwrite', (store) => (record ? store.put(record, CURRENT) : store.delete(CURRENT)));
+  if (!record) {
+    await withCharacterStore('readwrite', (store) => store.delete(CURRENT));
+    return;
+  }
+  record.id ??= newCharacterId();
+  record.addedAt ??= Date.now();
+  await withCharacterStore('readwrite', (store) => {
+    store.put(record, libraryKey(record.id));
+    return store.put(record, CURRENT);
+  });
+}
+
+// 保存した一覧（追加した順）
+export async function listCharacters() {
+  const range = IDBKeyRange.bound(LIBRARY_PREFIX, `${LIBRARY_PREFIX}\uffff`);
+  const records = await withCharacterStore('readonly', (store) => store.getAll(range));
+  return sortCharacters(records.filter((record) => isCharacterRecord(record) && record.id));
+}
+
+// 一覧にだけ入れる。いま使っているキャラクターと同じなら、そちらも書き換える
+export async function saveCharacter(record) {
+  record.id ??= newCharacterId();
+  record.addedAt ??= Date.now();
+  await withCharacterStore('readwrite', (store) => {
+    store.put(record, libraryKey(record.id));
+    const request = store.get(CURRENT);
+    request.onsuccess = () => {
+      if (request.result?.id === record.id) store.put(record, CURRENT);
+    };
+    return request;
+  });
+}
+
+// 一覧から消す。いま使っているキャラクターなら、それも外す
+export async function removeCharacter(id) {
+  await withCharacterStore('readwrite', (store) => {
+    store.delete(libraryKey(id));
+    const request = store.get(CURRENT);
+    request.onsuccess = () => {
+      if (request.result?.id === id) store.delete(CURRENT);
+    };
+    return request;
+  });
 }

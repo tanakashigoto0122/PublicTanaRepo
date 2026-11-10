@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>キャラクター管理室</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <!-- Three.js はリポジトリに同梱したものを読み込む（CDN は使わない） -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../assets/vendor/three/build/three.module.js",
+        "three/addons/": "../../assets/vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+  <style>
+    .viewer {
+      position: relative;
+      width: 100%;
+      height: min(48svh, 420px);
+      min-height: 260px;
+      margin: 12px 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .viewer canvas { display: block; width: 100%; height: 100%; }
+    .viewer .label {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      pointer-events: none;
+      font-weight: 700;
+    }
+    .viewer .label span { padding: 2px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .viewer .label .in-use { color: var(--accent); border-color: var(--accent); flex: none; }
+    .viewer .label [hidden] { display: none; }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+    .rename { display: flex; gap: 8px; margin-bottom: 8px; }
+    .rename button { flex: none; white-space: nowrap; }
+    .rename input { flex: 1 1 auto; min-width: 0; font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; }
+    .file-button { display: inline-block; padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; }
+    .file-button input { display: none; }
+    h2 { font-size: 1.1rem; margin: 20px 0 8px; }
+    .list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .card {
+      display: grid;
+      gap: 2px;
+      padding: 6px;
+      text-align: left;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      min-width: 0;
+    }
+    .card.selected { border-color: var(--accent); }
+    .card img { width: 100%; aspect-ratio: 1; border-radius: 6px; background: var(--bg); }
+    .card .name { font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card .meta { font-size: 0.75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card .badge { font-size: 0.75rem; font-weight: 700; color: var(--accent); }
+    .card .badge:empty { display: none; }
+    .empty { color: var(--muted); }
+    .empty[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>キャラクター管理室</h1>
+    <p class="muted">キャラクターを何体でも保存しておいて、使うものを切り替えられる。選んだキャラクターは、メカ・ブラスターやぷるぷるラボなどのゲームで使われる。</p>
+
+    <div class="viewer" id="viewer">
+      <div class="label"><span id="preview-name">-</span><span class="in-use" id="preview-in-use" hidden>使用中</span></div>
+    </div>
+    <p class="status" id="status"></p>
+
+    <div class="row">
+      <button class="primary" id="use">このキャラクターを使う</button>
+      <button id="turn">向きを回す</button>
+      <button id="download">書き出す</button>
+      <button id="remove">消す</button>
+    </div>
+    <div class="rename">
+      <input type="text" id="name" maxlength="40" placeholder="名前" aria-label="名前">
+      <button id="rename">名前を変える</button>
+    </div>
+
+    <h2>保存したキャラクター <span class="muted" id="count"></span></h2>
+    <p class="empty" id="empty">まだありません。「3D モデルを追加」から glb / gltf / obj / stl を選んでね。</p>
+    <div class="list" id="list"></div>
+
+    <div class="row">
+      <label class="file-button">3D モデルを追加<input type="file" id="file" accept=".glb,.gltf,.obj,.stl"></label>
+      <button id="unset">キャラクターを外す</button>
+    </div>
+    <p class="muted">正面を合わせる：上の画面で、キャラクターの顔が手前（矢印の向き）を向くまで「向きを回す」を押す。指でドラッグすると回して見られる。</p>
+    <p class="muted">「キャラクターを外す」と、メカ・ブラスターやぶっ飛ばしチャレンジは仮のロボ、ぷるぷるラボなどは粘土の玉になる。</p>
+    <p class="muted">キャラクターはこのブラウザの中だけに保存し、どこにも送りません。ぐにゃぐにゃ工房やてのひら粘土で作った形もここに並びます。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
