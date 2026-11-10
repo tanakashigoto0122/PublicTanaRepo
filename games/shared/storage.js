@@ -37,6 +37,15 @@ export async function readCharacter() {
   return isCharacterRecord(record) ? record : null;
 }
 
+// ブラウザに「容量が足りなくても、このサイトの保存を勝手に消さないで」と頼む。認められたら true
+export async function keepStorage() {
+  try {
+    return (await navigator.storage?.persist?.()) ?? false;
+  } catch {
+    return false;
+  }
+}
+
 // いま使うキャラクターにする。保存した一覧にも入れる（id がなければ新しく付ける）。
 // null を渡すと、いまのキャラクターを外す（一覧には残る）
 export async function writeCharacter(record) {
@@ -46,6 +55,7 @@ export async function writeCharacter(record) {
   }
   record.id ??= newCharacterId();
   record.addedAt ??= Date.now();
+  keepStorage();
   await withCharacterStore('readwrite', (store) => {
     store.put(record, libraryKey(record.id));
     return store.put(record, CURRENT);
@@ -63,6 +73,7 @@ export async function listCharacters() {
 export async function saveCharacter(record) {
   record.id ??= newCharacterId();
   record.addedAt ??= Date.now();
+  keepStorage();
   await withCharacterStore('readwrite', (store) => {
     store.put(record, libraryKey(record.id));
     const request = store.get(CURRENT);
