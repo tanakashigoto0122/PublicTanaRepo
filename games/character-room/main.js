@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  MAX_CHARACTERS, characterFileName, characterSummary, detectFormat, displayName, guessFacing, turnFacing,
+  MAX_CHARACTERS, backupFileName, characterFileName, characterSummary, detectFormat, displayName, guessFacing, packBackup, turnFacing, unpackBackup,
 } from './logic.js';
 import { cssValue } from '../shared/theme.js';
 import { parseModel } from '../shared/models.js';
-import { listCharacters, readCharacter, removeCharacter, saveCharacter, writeCharacter } from '../shared/storage.js';
+import {
+  keepStorage, listCharacters, readCharacter, removeCharacter, saveCharacter, writeCharacter,
+} from '../shared/storage.js';
 
 const MODEL_HEIGHT = 2;
 const THUMB_SIZE = 192;
@@ -315,15 +317,17 @@ nameEl.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') document.getElementById('rename').click();
 });
 
-document.getElementById('download').addEventListener('click', () => {
-  if (!selected) return;
-  const { name, data } = selected.record;
+function downloadFile(data, name) {
   const url = URL.createObjectURL(new Blob([data]));
   const link = document.createElement('a');
   link.href = url;
   link.download = name;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+document.getElementById('download').addEventListener('click', () => {
+  if (selected) downloadFile(selected.record.data, selected.record.name);
 });
 
 document.getElementById('remove').addEventListener('click', async () => {
@@ -356,6 +360,69 @@ document.getElementById('unset').addEventListener('click', async () => {
   setStatus('キャラクターを外しました。ゲームでは仮のロボや粘土の玉になります。');
 });
 
+// ---- バックアップ ----
+
+document.getElementById('backup').addEventListener('click', () => {
+  if (entries.length === 0) return setStatus('バックアップするキャラクターがまだありません。');
+  downloadFile(packBackup(entries.map((entry) => entry.record), currentId), backupFileName());
+  setStatus(`${entries.length} 体をバックアップしました。ファイルは端末の「ダウンロード」などに保存されます。`);
+});
+
+document.getElementById('restore').addEventListener('change', async (event) => {
+  const [file] = event.target.files;
+  event.target.value = '';
+  if (!file) return;
+  const backup = unpackBackup(await file.arrayBuffer());
+  if (!backup) return setStatus(`「${file.name}」はキャラクターのバックアップではないようです。`);
+  let added = 0;
+  let replaced = 0;
+  let skipped = 0;
+  try {
+    for (const record of backup.records) {
+      const existing = entries.find((entry) => entry.record.id === record.id);
+      if (!existing && entries.length >= MAX_CHARACTERS) {
+        skipped++;
+        continue;
+      }
+      await saveCharacter(record);
+      if (existing) {
+        disposeObject(existing.object);
+        Object.assign(existing, { record, object: null });
+        replaced++;
+      } else {
+        entries.push({ record, object: null, card: null });
+        added++;
+      }
+    }
+    // 使っているキャラクターがなければ、バックアップしたときのものを使う
+    const backupCurrent = entries.find((entry) => entry.record.id === backup.current);
+    if (!currentId && backupCurrent) {
+      await writeCharacter(backupCurrent.record);
+      currentId = backupCurrent.record.id;
+    }
+  } catch (error) {
+    storageFailed(error);
+  }
+  entries.sort((a, b) => (a.record.addedAt ?? 0) - (b.record.addedAt ?? 0));
+  renderList();
+  select(entries.find((entry) => entry.record.id === selected?.record.id) ?? entries[0] ?? null);
+  const parts = [`${added} 体を追加`, replaced > 0 ? `${replaced} 体を上書き` : '', skipped > 0 ? `${skipped} 体は ${MAX_CHARACTERS} 体を超えるので入れませんでした` : ''];
+  setStatus(`バックアップから戻しました（${parts.filter(Boolean).join('、')}）。`);
+  // 新しく入ったものと上書きしたものの絵を作り直す
+  for (const entry of entries) {
+    if (entry.object === null) await updateThumbnail(entry);
+  }
+});
+
+async function showPersistence() {
+  const el = document.getElementById('persist');
+  if (!navigator.storage?.persisted) return;
+  const kept = (await navigator.storage.persisted()) || (entries.length > 0 && await keepStorage());
+  el.textContent = kept
+    ? 'このブラウザは、ここの保存を勝手に消さないようにしています。'
+    : 'このブラウザは、容量が足りないときなどに保存を消すことがあります。バックアップしておくと安心。';
+}
+
 // ---- 描画 ----
 
 function animate() {
@@ -371,4 +438,4 @@ resize();
 resetCamera();
 updateSelection();
 requestAnimationFrame(animate);
-load();
+load().then(showPersistence);

@@ -112,6 +112,15 @@
       <label class="file-button">3D モデルを追加<input type="file" id="file" accept=".glb,.gltf,.obj,.stl"></label>
       <button id="unset">キャラクターを外す</button>
     </div>
+
+    <h2>バックアップ</h2>
+    <div class="row">
+      <button id="backup">全部バックアップ</button>
+      <label class="file-button">バックアップから戻す<input type="file" id="restore" accept=".mgchar"></label>
+    </div>
+    <p class="muted" id="persist"></p>
+    <p class="muted">「全部バックアップ」で全キャラクターを 1 つのファイル（.mgchar）にまとめてダウンロードできる。ブラウザのデータを消したときや、別の端末・別のブラウザに移すときは「バックアップから戻す」で読み込む。同じキャラクターは上書きされ、ないものは追加される。</p>
+    <p class="muted">iPhone の Safari は、しばらくサイトを開かないと保存を消すことがある。ホーム画面に追加して使うか、ときどきバックアップしておくと安心。</p>
     <p class="muted">正面を合わせる：上の画面で、キャラクターの顔が手前（矢印の向き）を向くまで「向きを回す」を押す。指でドラッグすると回して見られる。</p>
     <p class="muted">「キャラクターを外す」と、メカ・ブラスターやぶっ飛ばしチャレンジは仮のロボ、ぷるぷるラボなどは粘土の玉になる。</p>
     <p class="muted">キャラクターはこのブラウザの中だけに保存し、どこにも送りません。ぐにゃぐにゃ工房やてのひら粘土で作った形もここに並びます。</p>
