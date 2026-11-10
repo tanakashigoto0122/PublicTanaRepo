@@ -61,6 +61,7 @@ games/<id>/index.html   各ゲームのページ（ページ固有のスタイ�
 games/<id>/logic.js     DOM に依存しないゲームロジック
 games/<id>/main.js      描画と入力処理
 tests/<id>.test.js      logic.js のテスト
+docs/                   保留中の計画などのメモ（Pages には公開しない）
 .github/workflows/      ci.yml（テスト）、pages.yml（main へのマージで Pages にデプロイ）
 ```
 
