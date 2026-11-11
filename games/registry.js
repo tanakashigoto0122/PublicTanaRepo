@@ -97,6 +97,11 @@ export const games = [
     description: 'キャラクターを手足がぐにゃっと動く人形にして、階段から突き落とす。ぶつかった強さが点数になる。',
   },
   {
+    id: 'giant-rampage',
+    title: '巨大化パニック',
+    description: '巨大なキャラクターになって、60 秒で箱のビル街をなぎ倒す。壊すほど大きくなる。',
+  },
+  {
     id: 'model-stage',
     title: '3D展示ステージ',
     description: '作ったキャラクターや積み木作品を回転台に飾って、好きな角度で写真を撮る。',
