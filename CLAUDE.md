@@ -90,6 +90,8 @@ Node 20 以上が必要（CI は Node 22）。`npm install` は不要。
 
 - `logic.js` の公開関数はすべてテストする。初期状態、正しい手・不正な手、勝敗判定、境界（盤面の端など）を最低限カバーする。
 - `npm test` が通らない変更はコミットしない。
+- 物理の結果を確かめたいテストは、同梱の cannon-es（`assets/vendor/cannon-es/dist/cannon-es.js`）を直接 import してよい。
+  cannon-es を引数で受け取るモジュールにしておくと、ページとテストで同じ処理を使える（例: `games/contraption/physics.js`）。
 - DOM 側の変更は、可能ならヘッドレスブラウザ（Playwright の Chromium がクラウド環境に入っている）で
   ページを開き、コンソールエラーがないことと基本操作ができることを確認する。
 
