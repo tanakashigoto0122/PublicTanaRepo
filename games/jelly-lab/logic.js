@@ -139,9 +139,10 @@ function centroid(array, members) {
 export const STATIC_FRICTION_SPEED = 0.5;
 // rollingResistance（1 秒あたり）は、床に触れているときに体全体の回転を弱める強さ。
 // やわらかい物は転がると形が崩れて抵抗が大きい。これがないと、少しの偏りで置いただけの体が転がり続ける
+// floorAt(x, z) を渡すと、床の高さを場所ごとに変えられる（土俵のような台）。なければ y = 0
 export function stepBody(body, {
   dt, stiffness, gravity = -9.82, bounce = 0.3, friction = 0.8, wall = 4, pinStrength = 0.5, globalWeight = 4,
-  rollingResistance = 15,
+  rollingResistance = 15, floorAt = null,
 }) {
   const { rest, positions, velocities, clusters, rotations } = body;
   const count = positions.length / 3;
@@ -199,9 +200,10 @@ export function stepBody(body, {
   // 床と壁
   for (let i = 0; i < count; i++) {
     const y = i * 3 + 1;
-    body.grounded[i] = positions[y] <= 1e-3 ? 1 : 0;
-    if (positions[y] < 0) {
-      positions[y] = 0;
+    const floorY = floorAt ? floorAt(positions[i * 3], positions[i * 3 + 2]) : 0;
+    body.grounded[i] = positions[y] <= floorY + 1e-3 ? 1 : 0;
+    if (positions[y] < floorY) {
+      positions[y] = floorY;
       if (velocities[y] < 0) velocities[y] = -velocities[y] * bounce;
       velocities[i * 3] *= friction;
       velocities[i * 3 + 2] *= friction;
