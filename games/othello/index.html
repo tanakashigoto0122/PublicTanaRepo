@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>オセロ</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <style>
+    .board {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 2px;
+      width: min(100%, 420px);
+      aspect-ratio: 1;
+      margin: 12px 0;
+      padding: 4px;
+      background: var(--piece-s);
+      border-radius: 10px;
+    }
+    .cell {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: none;
+      border-radius: 3px;
+      background: color-mix(in srgb, var(--piece-s) 75%, var(--surface));
+    }
+    .cell:disabled { cursor: default; opacity: 1; }
+    .stone { width: 82%; height: 82%; border-radius: 50%; transition: background 0.25s; }
+    .stone.black { background: var(--text); box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--text) 60%, var(--surface)); }
+    .stone.white { background: var(--surface); box-shadow: inset 0 -2px 0 var(--border); }
+    .hint { width: 26%; height: 26%; border-radius: 50%; background: color-mix(in srgb, var(--text) 30%, transparent); }
+    .cell.last::after { content: ''; position: absolute; width: 14%; height: 14%; border-radius: 50%; background: var(--piece-z); }
+    .scores { display: flex; gap: 16px; font-weight: 700; }
+    .scores .turn { text-decoration: underline; text-underline-offset: 4px; }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .row select { font: inherit; padding: 4px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>オセロ</h1>
+    <p class="muted">相手の石をはさむと裏返して自分の色にできる。最後に石が多いほうの勝ち。</p>
+    <div class="scores"><span id="black-score">● 黒 2</span><span id="white-score">○ 白 2</span></div>
+    <div class="board" id="board"></div>
+    <p class="status" id="status"></p>
+    <div class="row">
+      <label>あいて <select id="mode">
+        <option value="easy">CPU：よわい</option>
+        <option value="normal" selected>CPU：ふつう</option>
+        <option value="hard">CPU：つよい</option>
+        <option value="two">2 人で</option>
+      </select></label>
+      <label>あなたは <select id="color">
+        <option value="1" selected>黒（先手）</option>
+        <option value="2">白（後手）</option>
+      </select></label>
+    </div>
+    <div class="row">
+      <button id="new">はじめから</button>
+      <button id="undo">1 手もどす</button>
+    </div>
+    <p class="muted">小さな点が置ける所。赤い点はいま置かれた石。隅を取ると強い。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
