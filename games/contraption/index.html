@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>からくり装置</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <!-- Three.js と cannon-es はリポジトリに同梱したものを読み込む（CDN は使わない） -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../assets/vendor/three/build/three.module.js",
+        "three/addons/": "../../assets/vendor/three/examples/jsm/",
+        "cannon-es": "../../assets/vendor/cannon-es/dist/cannon-es.js"
+      }
+    }
+  </script>
+  <style>
+    .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .stages button { min-width: 44px; }
+    .stages button.current { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+    .viewer {
+      position: relative;
+      width: 100%;
+      height: min(54svh, 560px);
+      min-height: 340px;
+      margin: 8px 0;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .viewer canvas { display: block; width: 100%; height: 100%; }
+    .title {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .title span { padding: 2px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      gap: 10px;
+      text-align: center;
+      padding: 16px;
+      background: color-mix(in srgb, var(--bg) 82%, transparent);
+    }
+    .overlay[hidden] { display: none; }
+    .overlay h2 { margin: 0; font-size: 1.6rem; }
+    .overlay p { margin: 0; }
+    .overlay .buttons { display: flex; gap: 8px; justify-content: center; }
+    .overlay button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 700; }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .palette button.selected { outline: 3px solid var(--accent); outline-offset: 1px; }
+    .palette button:disabled { opacity: 0.45; }
+    .run { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 700; min-width: 96px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>からくり装置</h1>
+    <p class="muted">板やドミノ、バネを置いて、玉がかごに入る仕掛けを作るパズル。置き終わったら「スタート」。</p>
+    <div class="stages" id="stages"></div>
+    <div class="viewer" id="viewer">
+      <div class="title"><span id="stage-title"></span></div>
+      <div class="overlay" id="overlay" hidden>
+        <h2>クリア！</h2>
+        <p id="overlay-text"></p>
+        <div class="buttons"><button id="again">もう一度見る</button><button class="primary" id="next">次へ</button></div>
+      </div>
+    </div>
+    <p class="status" id="status"></p>
+    <div class="row palette" id="palette"></div>
+    <div class="row">
+      <button class="run" id="run">スタート</button>
+      <button id="rotate">回す</button>
+      <button id="remove">消す</button>
+      <button id="clear">全部片づける</button>
+    </div>
+    <p class="muted">置き方：下の部品を選んでから、盤面をタップすると置ける。置いた部品はドラッグで動かし、選んで「回す」「消す」。灰色の台や壁、かごは動かせない。ほかの物と重なる所には置けない。</p>
+    <p class="muted">「スタート」で玉が動き出す。うまくいかなかったら「止める」で元に戻して、置き方を変えよう。クリアした面には ✓ が付く（このブラウザに保存）。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

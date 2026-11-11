@@ -102,6 +102,11 @@ export const games = [
     description: '巨大なキャラクターになって、60 秒で箱のビル街をなぎ倒す。壊すほど大きくなる。',
   },
   {
+    id: 'contraption',
+    title: 'からくり装置',
+    description: '板やドミノ、バネを置いて、玉がかごに入る仕掛けを作る物理パズル。5 面と、自由に作るモードがある。',
+  },
+  {
     id: 'model-stage',
     title: '3D展示ステージ',
     description: '作ったキャラクターや積み木作品を回転台に飾って、好きな角度で写真を撮る。',
