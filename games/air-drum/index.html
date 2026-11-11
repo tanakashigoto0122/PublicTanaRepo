@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>エアドラム</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <!-- MediaPipe はリポジトリに同梱したものを読み込む（CDN は使わない） -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@mediapipe/tasks-vision": "../../assets/vendor/mediapipe/vision_bundle.mjs"
+      }
+    }
+  </script>
+  <style>
+    .viewer {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      max-height: 62svh;
+      margin: 12px 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .viewer canvas { display: block; width: 100%; height: 100%; }
+    .viewer video { display: none; }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      gap: 10px;
+      text-align: center;
+      padding: 16px;
+      background: color-mix(in srgb, var(--bg) 85%, transparent);
+    }
+    .overlay[hidden] { display: none; }
+    .overlay p { margin: 0; }
+    .overlay .buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .overlay button { padding: 10px 20px; font-weight: 700; }
+    .overlay .primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .row label { display: flex; align-items: center; gap: 6px; }
+    .row input[type="range"] { width: 120px; accent-color: var(--accent); }
+    .record { background: var(--piece-z); border-color: var(--piece-z); color: var(--surface); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>エアドラム</h1>
+    <p class="muted">カメラの前で人差し指を振り下ろすと、そこにある太鼓やシンバルが鳴る。指でタップしても鳴らせる。</p>
+    <div class="viewer" id="viewer">
+      <canvas id="canvas"></canvas>
+      <video id="video" playsinline muted></video>
+      <div class="overlay" id="overlay">
+        <p>音が出ます。音量に気をつけてね。</p>
+        <div class="buttons">
+          <button class="primary" id="start-camera">カメラで叩く</button>
+          <button id="start-touch">指でタップして叩く</button>
+        </div>
+      </div>
+    </div>
+    <p class="status" id="status"></p>
+    <div class="row">
+      <button id="camera" disabled>カメラを止める</button>
+      <label><input type="checkbox" id="show-video" checked> 自分を映す</label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="metronome"> メトロノーム</label>
+      <label>テンポ <input type="range" id="bpm" min="60" max="180" value="100"> <span id="bpm-value">100</span></label>
+    </div>
+    <div class="row">
+      <button class="record" id="record">● 録音</button>
+      <button id="clear-loop" disabled>くり返しを消す</button>
+      <span class="muted" id="loop-info"></span>
+    </div>
+    <p class="muted">カメラ：スマホを立てかけて少し離れ、人差し指を立てて、太鼓の上で素早く下へ振る。強く振るほど大きな音。指を一度上げると、また叩ける。</p>
+    <p class="muted">録音：「● 録音」を押してから叩き、もう一度押すと、叩いた音が小節に合わせてくり返し鳴る。その上にさらに重ねて録音できる。</p>
+    <p class="muted">キーボード：Q シンバル、A ハイハット、S スネア、T タム、D フロアタム、P ライド、スペース バスドラ。</p>
+    <p class="muted">カメラの映像はこのブラウザの中だけで処理し、保存も送信もしません。音はその場で作っています。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
