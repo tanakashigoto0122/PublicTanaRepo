@@ -92,6 +92,11 @@ export const games = [
     description: 'ぷるぷるになったキャラクターどうしで押し合い、土俵の外へ出したら勝ち。CPU とも 2 人でも遊べる。',
   },
   {
+    id: 'stair-tumble',
+    title: 'ラグドール階段落ち',
+    description: 'キャラクターを手足がぐにゃっと動く人形にして、階段から突き落とす。ぶつかった強さが点数になる。',
+  },
+  {
     id: 'model-stage',
     title: '3D展示ステージ',
     description: '作ったキャラクターや積み木作品を回転台に飾って、好きな角度で写真を撮る。',
