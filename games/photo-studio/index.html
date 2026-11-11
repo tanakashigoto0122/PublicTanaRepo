@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>キャラ写真スタジオ</title>
+  <link rel="stylesheet" href="../../assets/style.css">
+  <!-- Three.js はリポジトリに同梱したものを読み込む（CDN は使わない） -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../assets/vendor/three/build/three.module.js",
+        "three/addons/": "../../assets/vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+  <style>
+    .viewer {
+      position: relative;
+      width: 100%;
+      height: min(60svh, 560px);
+      min-height: 300px;
+      margin: 12px 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .viewer canvas { display: block; width: 100%; height: 100%; }
+    .stamps { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .stamp {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: auto;
+      cursor: grab;
+      white-space: nowrap;
+      line-height: 1;
+      font-weight: 800;
+      touch-action: none;
+    }
+    .stamp.text { color: var(--surface); -webkit-text-stroke: 0.06em var(--text); paint-order: stroke fill; }
+    .stamp.selected { outline: 2px dashed var(--accent); outline-offset: 4px; }
+    .flash { position: absolute; inset: 0; background: var(--surface); opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+    .flash.on { opacity: 0.9; transition: none; }
+    .status { min-height: 1.6em; margin: 0 0 8px; }
+    h2 { font-size: 1.05rem; margin: 18px 0 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .row select, .row input[type="text"] { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; min-width: 0; }
+    .row input[type="text"] { flex: 1 1 140px; }
+    .chips button.selected { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+    .sliders { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px 16px; margin-bottom: 8px; }
+    .sliders label { display: grid; gap: 2px; font-size: 0.9rem; }
+    .sliders input { width: 100%; accent-color: var(--accent); }
+    .sliders[hidden], .row[hidden] { display: none; }
+    .stamp-buttons button { font-size: 1.3rem; padding: 2px 8px; }
+    .shoot { background: var(--piece-z); border-color: var(--piece-z); color: var(--surface); font-weight: 700; font-size: 1.1rem; padding: 8px 24px; }
+    .photo-result img { display: block; width: 100%; max-width: 420px; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 8px; }
+    .photo-result[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="../../">← ゲーム一覧</a></p>
+    <h1>キャラ写真スタジオ</h1>
+    <p class="muted">キャラクターを並べて、背景・光・スタンプ・文字を付けて記念撮影。写真は画像で保存できる。</p>
+    <div class="viewer" id="viewer">
+      <div class="stamps" id="stamps"></div>
+      <div class="flash" id="flash"></div>
+    </div>
+    <p class="status" id="status"></p>
+    <div class="row">
+      <button class="shoot" id="shoot">📸 撮る</button>
+      <button id="reset-camera">カメラを戻す</button>
+    </div>
+    <div class="photo-result" id="result" hidden>
+      <img id="photo" alt="撮った写真">
+      <div class="row"><button id="save">保存する</button><button id="share" hidden>共有する</button></div>
+    </div>
+
+    <h2>キャラクター</h2>
+    <div class="row">
+      <select id="character"></select>
+      <button id="add">並べる</button>
+    </div>
+    <div class="row chips" id="chips"></div>
+    <div class="sliders" id="character-controls" hidden>
+      <label>向き <input type="range" id="rotation" min="-180" max="180" value="0"></label>
+      <label>大きさ <input type="range" id="scale" min="40" max="200" value="100"></label>
+      <label>傾き <input type="range" id="tilt" min="-30" max="30" value="0"></label>
+    </div>
+    <div class="row" id="pose-row" hidden>
+      <label>ポーズ <select id="clip"></select></label>
+      <input type="range" id="pose-time" min="0" max="1000" value="0" aria-label="ポーズの時間">
+    </div>
+    <div class="row" id="remove-row" hidden><button id="remove-character">このキャラを外す</button></div>
+
+    <h2>背景と光</h2>
+    <div class="row chips" id="backgrounds"></div>
+    <div class="sliders">
+      <label>光の向き <input type="range" id="light-azimuth" min="-180" max="180" value="35"></label>
+      <label>光の高さ <input type="range" id="light-elevation" min="5" max="85" value="50"></label>
+      <label>明るさ <input type="range" id="brightness" min="30" max="200" value="100"></label>
+    </div>
+    <div class="row"><label>フィルター <select id="filter"></select></label></div>
+
+    <h2>スタンプと文字</h2>
+    <div class="row stamp-buttons" id="stamp-buttons"></div>
+    <div class="row">
+      <input type="text" id="text" maxlength="24" placeholder="文字（例：はい、チーズ！）" aria-label="写真に入れる文字">
+      <button id="add-text">文字を置く</button>
+    </div>
+    <div class="row" id="stamp-controls" hidden>
+      <button id="stamp-bigger">大きく</button>
+      <button id="stamp-smaller">小さく</button>
+      <button id="stamp-rotate">回す</button>
+      <button id="stamp-remove">消す</button>
+    </div>
+
+    <p class="muted">操作：キャラクターを指でドラッグすると床の上で動く。何もない所をドラッグするとカメラが回り、2 本指で近づく。スタンプや文字もドラッグで動かせる。</p>
+    <p class="muted">キャラクターは<a href="../character-room/">キャラクター管理室</a>に保存したものから選べる。アニメーション付きの glb なら、ポーズを選んで止められる。写真はこのブラウザの中で作り、どこにも送りません。</p>
+  </main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
